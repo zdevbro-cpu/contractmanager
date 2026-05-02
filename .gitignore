@@ -1,0 +1,28 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+web/dist/
+
+# Dependencies
+web/node_modules/
+
+# Firebase local cache
+.firebase/
+
+# IDE
+.vscode/
+.idea/
