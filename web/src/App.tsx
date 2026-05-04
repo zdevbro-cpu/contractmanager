@@ -750,12 +750,12 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
               <Search size={16} />
               <input 
                 className="input-input" 
-                list="contractor-names" 
                 placeholder="계약자명 검색" 
                 value={contractorFilter === "전체" ? "" : contractorFilter} 
                 onChange={(e) => setContractorFilter(e.target.value)} 
                 title=""
-                style={{ appearance: "none", MozAppearance: "none", WebkitAppearance: "none", paddingRight: "30px" }}
+                autoComplete="off"
+                style={{ paddingRight: "30px" }}
               />
               <button 
                 className="icon-btn" 
@@ -765,12 +765,6 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
                 <X size={14} />
               </button>
             </div>
-            <datalist id="contractor-names">
-              <option value="전체" />
-              {[...new Set(allowanceRows.map((r) => r.name))].sort((a, b) => a.localeCompare(b, "ko")).map((name) => (
-                <option key={name} value={name} />
-              ))}
-            </datalist>
           </div>
           <div className="allowance-filter-actions">
             <button className="line-btn allowance-reset-btn" onClick={() => { setStartDate(today); setEndDate(today); setContractorFilter("전체"); setPage(1); }}>초기화</button>
