@@ -43,7 +43,7 @@ type ContractRowData = {
   residentRegistrationNumber?: string;
 };
 
-type MenuKey = "dashboard" | "contracts" | "appointment" | "referrers" | "allowances" | "salaries" | "account" | "changes" | "system";
+type MenuKey = "dashboard" | "contracts" | "appointment" | "referrers" | "allowances" | "salaries" | "account" | "changes" | "system" | "none";
 type ContractView = "list" | "create" | "detail";
 type DetailTab = "basic" | "document" | "allowance" | "account" | "history" | "memo";
 type UserAccount = { id: number; email: string; role: "시스템관리자" | "운영자"; state: "활성" | "비활성"; password: string };
@@ -68,14 +68,16 @@ function phoneFmt(v: string): string {
   return n.slice(0, 3) + "-" + n.slice(3, 7) + "-" + n.slice(7);
 }
 
-const menus: { key: MenuKey; label: string; icon: JSX.Element; group?: string }[] = [
-  { key: "dashboard", label: "대시보드", icon: <Home size={18} /> },
-  { key: "contracts", label: "점장점주계약", icon: <FileText size={18} />, group: "계약관리" },
-  { key: "appointment", label: "임용계약", icon: <Plus size={18} />, group: "계약관리" },
-  { key: "referrers", label: "추천인 관리", icon: <Users size={18} /> },
-  { key: "allowances", label: "수당지급관리", icon: <Wallet size={18} />, group: "지급관리" },
-  { key: "salaries", label: "급여지급관리", icon: <CircleDollarSign size={18} />, group: "지급관리" },
-  { key: "system", label: "시스템 관리", icon: <Settings size={18} /> }
+const menus: { key: MenuKey; label: string; indent?: boolean; isHeader?: boolean }[] = [
+  { key: "dashboard", label: "대시보드" },
+  { key: "none", label: "계약관리", isHeader: true },
+  { key: "contracts", label: "점주점장계약", indent: true },
+  { key: "appointment", label: "임용계약", indent: true },
+  { key: "none", label: "지급관리", isHeader: true },
+  { key: "allowances", label: "수당지급", indent: true },
+  { key: "salaries", label: "급여지급", indent: true },
+  { key: "referrers", label: "추천인관리" },
+  { key: "system", label: "시스템관리" }
 ];
 
 function AppointmentPage() {
@@ -2252,31 +2254,25 @@ export function App() {
   }
 
   const renderNavItems = () => {
-    const items: JSX.Element[] = [];
-    let lastGroup = "";
-
-    menus.forEach((m) => {
-      if (m.group && m.group !== lastGroup) {
-        items.push(<div key={`group-${m.group}`} className="sidebar-group-label">{m.group}</div>);
-        lastGroup = m.group;
-      } else if (!m.group && lastGroup) {
-        lastGroup = "";
+    return menus.map((m, idx) => {
+      if (m.isHeader) {
+        return <div key={`header-${idx}`} className="sidebar-header">{m.label}</div>;
       }
-
-      items.push(
+      return (
         <button
-          key={m.key}
-          className={`nav ${menu === m.key ? "active" : ""}`}
+          key={m.key + idx}
+          className={`nav ${menu === m.key ? "active" : ""} ${m.indent ? "indent" : ""}`}
           onClick={() => {
-            setMenu(m.key);
-            if (m.key !== "contracts") setContractView("list");
+            if (m.key !== "none") {
+              setMenu(m.key);
+              if (m.key !== "contracts") setContractView("list");
+            }
           }}
         >
-          {m.icon}<span>{m.label}</span>
+          <span>{m.label}</span>
         </button>
       );
     });
-    return items;
   };
 
   return (
