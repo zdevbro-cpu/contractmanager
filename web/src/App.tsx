@@ -640,7 +640,7 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
 
   const filteredRows = allowanceRows.filter((row) => {
     const inDate = !startDate || !endDate || !row.baseDate || (row.baseDate >= startDate && row.baseDate <= endDate);
-    const inContractor = contractorFilter === "전체" || row.name === contractorFilter;
+    const inContractor = !contractorFilter || contractorFilter === "전체" || row.name.includes(contractorFilter);
     return inDate && inContractor;
   });
   const totalAmount = filteredRows.reduce((sum, row) => sum + row.amount, 0);
@@ -752,14 +752,16 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
                 className="input-input" 
                 list="contractor-names" 
                 placeholder="계약자명 검색" 
-                value={contractorFilter} 
+                value={contractorFilter === "전체" ? "" : contractorFilter} 
                 onChange={(e) => setContractorFilter(e.target.value)} 
+                title=""
+                style={{ appearance: "none", MozAppearance: "none", WebkitAppearance: "none" }}
               />
-              {contractorFilter && contractorFilter !== "전체" && (
+              {contractorFilter && (
                 <button 
                   className="icon-btn" 
                   style={{ border: "none", padding: "4px", background: "transparent", color: "#8a97ac", cursor: "pointer" }}
-                  onClick={() => setContractorFilter("전체")}
+                  onClick={() => setContractorFilter("")}
                 >
                   <X size={14} />
                 </button>
