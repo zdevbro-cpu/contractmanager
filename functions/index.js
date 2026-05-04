@@ -77,6 +77,7 @@ function normalizeRows(rows) {
     accountHolder: row.account_holder ?? "",
     residentRegistrationNumber: row.resident_registration_number ?? "",
     remarks: row.remarks ?? "",
+    isAppointment: row.is_appointment ?? false,
     phone: row.phone ?? "",
     createdAt: row.created_at ? String(row.created_at).slice(0, 10) : "",
     updatedAt: row.updated_at ? String(row.updated_at).slice(0, 10) : ""
@@ -93,6 +94,7 @@ async function ensureAppSchema() {
   await safeAlter("alter table contracts add column if not exists account_holder text");
   await safeAlter("alter table contracts add column if not exists resident_registration_number text");
   await safeAlter("alter table contracts add column if not exists remarks text");
+  await safeAlter("alter table contracts add column if not exists is_appointment boolean not null default false");
   await pool.query(`
     create table if not exists contract_types (
       id bigserial primary key,
@@ -209,6 +211,7 @@ app.get("/contracts", async (_req, res) => {
         account_holder,
         resident_registration_number,
         remarks,
+        is_appointment,
         created_at
       from contracts
       where contractor_name is not null
@@ -216,6 +219,42 @@ app.get("/contracts", async (_req, res) => {
       order by contract_date desc nulls last, contract_no desc
     `);
     res.json({ rows: normalizeRows(result.rows) });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
+  }
+});
+
+app.post("/contracts", async (req, res) => {
+  const body = req.body ?? {};
+  try {
+    await ensureAppSchema();
+    const result = await pool.query(
+      `INSERT INTO contracts (
+        contract_no, contractor_name, contract_name,
+        referrer_name, contract_date, first_allowance_date, contract_end_date,
+        deposit_amount, work_allowance, bank_name, account_no, account_holder,
+        resident_registration_number, phone, is_appointment
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+      RETURNING id, contract_no`,
+      [
+        body.contractNo ?? null,
+        body.name ?? null,
+        body.type ?? null,
+        body.ref ?? null,
+        body.contractDate ?? null,
+        body.payoutDate ?? null,
+        body.endDate ?? null,
+        body.depositAmountValue != null ? body.depositAmountValue : null,
+        body.allowanceAmountValue != null ? body.allowanceAmountValue : null,
+        body.bankName ?? null,
+        body.accountNo ?? null,
+        body.accountHolder ?? null,
+        body.residentRegistrationNumber ?? null,
+        body.phone ?? null,
+        body.isAppointment === true
+      ]
+    );
+    res.json({ ok: true, id: result.rows[0].id, contractNo: result.rows[0].contract_no });
   } catch (error) {
     res.status(500).json({ message: String(error) });
   }
