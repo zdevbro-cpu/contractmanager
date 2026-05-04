@@ -172,8 +172,11 @@ button { font-family: inherit; }
 .contract-grid th.center-th { text-align: center !important; }
 .contract-grid td { text-align: center; }
 .text-right { text-align: right !important; }
-.search-box .input-input::-webkit-calendar-picker-indicator {
+.search-box .input-input::-webkit-calendar-picker-indicator,
+.search-box .input-input::-webkit-inner-spin-button,
+.search-box .input-input::-webkit-clear-button {
   display: none !important;
+  -webkit-appearance: none;
 }
 .sort-btn {
   border: 0;

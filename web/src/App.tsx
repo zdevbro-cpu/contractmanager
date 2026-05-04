@@ -642,7 +642,7 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
     const inDate = !startDate || !endDate || !row.baseDate || (row.baseDate >= startDate && row.baseDate <= endDate);
     const inContractor = !contractorFilter || contractorFilter === "전체" || row.name.includes(contractorFilter);
     return inDate && inContractor;
-  });
+  }).sort((a, b) => a.name.localeCompare(b.name, "ko"));
   const totalAmount = filteredRows.reduce((sum, row) => sum + row.amount, 0);
   const confirmedAmount = filteredRows.filter((row) => row.status.includes("지급확정") || row.status.includes("정상운영")).reduce((sum, row) => sum + row.amount, 0);
   const completedAmount = filteredRows.filter((row) => row.status.includes("정상운영")).reduce((sum, row) => sum + row.amount, 0);
@@ -755,17 +755,15 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
                 value={contractorFilter === "전체" ? "" : contractorFilter} 
                 onChange={(e) => setContractorFilter(e.target.value)} 
                 title=""
-                style={{ appearance: "none", MozAppearance: "none", WebkitAppearance: "none" }}
+                style={{ appearance: "none", MozAppearance: "none", WebkitAppearance: "none", paddingRight: "30px" }}
               />
-              {contractorFilter && (
-                <button 
-                  className="icon-btn" 
-                  style={{ border: "none", padding: "4px", background: "transparent", color: "#8a97ac", cursor: "pointer" }}
-                  onClick={() => setContractorFilter("")}
-                >
-                  <X size={14} />
-                </button>
-              )}
+              <button 
+                className="icon-btn" 
+                style={{ border: "none", padding: "4px", background: "transparent", color: "#8a97ac", cursor: "pointer", position: "absolute", right: "8px" }}
+                onClick={() => setContractorFilter("전체")}
+              >
+                <X size={14} />
+              </button>
             </div>
             <datalist id="contractor-names">
               <option value="전체" />
