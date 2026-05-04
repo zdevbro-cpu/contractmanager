@@ -229,6 +229,39 @@ app.put("/contracts/:contractNo", async (req, res) => {
   }
 });
 
+app.get("/contracts/:contractNo/pdf", async (req, res) => {
+  const { contractNo } = req.params;
+  try {
+    const result = await pool.query("select contractor_name, contract_name, contract_date from contracts where contract_no = $1", [contractNo]);
+    if (result.rowCount === 0) return res.status(404).send("Contract not found");
+    
+    const { contractor_name, contract_name, contract_date } = result.rows[0];
+    const dateStr = contract_date ? new Date(contract_date).toISOString().slice(0, 10).replace(/-/g, "") : "";
+    const fs = require("fs");
+    const path = require("path");
+    
+    // Search in data subdirectories
+    const dataRoot = path.join(__dirname, "..", "data");
+    const months = ["2026년 1월", "2026년 2월", "2026년 3월", "2026년 4월", "2026년 5월"];
+    let filePath = null;
+    
+    for (const m of months) {
+      const p = path.join(dataRoot, m, `${contract_name}_${dateStr}_${contractor_name}.pdf`);
+      if (fs.existsSync(p)) {
+        filePath = p;
+        break;
+      }
+    }
+    
+    if (!filePath) return res.status(404).send("PDF file not found on server");
+    
+    res.setHeader("Content-Type", "application/pdf");
+    res.sendFile(filePath);
+  } catch (error) {
+    res.status(500).send(String(error));
+  }
+});
+
 app.get("/changes", async (_req, res) => {
   try {
     await ensureAppSchema();

@@ -482,7 +482,11 @@ function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
           </div>
         )}
         <div className="actions detail-file-actions">
-          <button className="primary-btn" onClick={() => alert("준비 중인 기능입니다. (파일 서버 연결 필요)")}>계약서 보기</button>
+          <button className="primary-btn" onClick={() => {
+            if (!row?.no) return;
+            const url = `${API_BASE}/contracts/${row.no}/pdf`;
+            window.open(url, "_blank");
+          }}>계약서 보기</button>
           <button className="line-btn">파일 업로드/변경</button>
         </div>
       </div>
