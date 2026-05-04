@@ -893,47 +893,46 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
   const [perPage, setPerPage] = useState(20);
   const [page, setPage] = useState(1);
 
-  const allowanceRows = (rows || []).flatMap((r) => {
-    if (!r.payoutDate) return [];
-    const contractStart = new Date(r.payoutDate);
-    const contractEnd = r.endDate ? new Date(r.endDate) : new Date("2099-12-31");
-    const filterStart = new Date(startDate);
-    const filterEnd = new Date(endDate);
-    const startDay = filterStart.getDate();
-    const endDay = filterEnd.getDate();
+  const parseLocalDate = (dateStr: string) => {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  };
 
-    const occurrences = [];
-    let m = 0;
-    while (true) {
-      const current = new Date(contractStart.getFullYear(), contractStart.getMonth() + m, contractStart.getDate());
-      if (current > filterEnd || current > contractEnd) break;
-      
-      const curDay = current.getDate();
-      // Only include if the day of the month matches the filter's day range
-      if (curDay >= startDay && curDay <= endDay) {
-        const rawAccountNo = r.accountNo || "";
-        const masked = rawAccountNo.length > 4
-          ? rawAccountNo.slice(0, rawAccountNo.length - 4).replace(/\d/g, "*") + rawAccountNo.slice(-4)
-          : rawAccountNo;
-          
-        occurrences.push({
-          ...r,
-          baseDate: formatDate(current),
-          amount: Number(r.allowanceAmountRaw ?? 0),
-          bankName: r.bankName || "",
-          accountNo: rawAccountNo,
-          accountMasked: masked || "",
-          verifyStatus: "검증완료",
-        });
-      }
-      m++;
-      if (m > 1200) break; // Safety for 100 years
-    }
-    return occurrences;
+  const allowanceRows = (rows || []).map((r) => {
+    const rawAccountNo = r.accountNo || "";
+    const masked = rawAccountNo.length > 4
+      ? rawAccountNo.slice(0, rawAccountNo.length - 4).replace(/\d/g, "*") + rawAccountNo.slice(-4)
+      : rawAccountNo;
+    return {
+      ...r,
+      baseDate: r.payoutDate || "",
+      amount: Number(r.allowanceAmountRaw ?? 0),
+      bankName: r.bankName || "",
+      accountNo: rawAccountNo,
+      accountMasked: masked || "",
+      verifyStatus: "검증완료",
+    };
   });
 
   const filteredRows = allowanceRows.filter((row) => {
-    const inDate = true; // Already handled by aggregation logic
+    if (!row.baseDate || !startDate || !endDate) return true;
+    
+    // Parse filter days
+    const filterStart = parseLocalDate(startDate);
+    const filterEnd = parseLocalDate(endDate);
+    const startDay = filterStart.getDate();
+    const endDay = filterEnd.getDate();
+
+    // Parse record day
+    const recordDate = parseLocalDate(row.baseDate);
+    const recordDay = recordDate.getDate();
+
+    // The core "Aggregation" logic: 
+    // Match by day of month, but show original record data
+    const dayMatches = recordDay >= startDay && recordDay <= endDay;
+    const isPastOrPresent = recordDate.getTime() <= filterEnd.getTime();
+    const inDate = dayMatches && isPastOrPresent;
+
     const inContractor = !contractorFilter || contractorFilter === "전체" || row.name.includes(contractorFilter);
     return inDate && inContractor;
   }).sort((a, b) => b.baseDate.localeCompare(a.baseDate) || a.name.localeCompare(b.name, "ko"));
