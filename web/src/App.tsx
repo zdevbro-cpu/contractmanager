@@ -527,19 +527,21 @@ function DetailHistoryTab({
             <th>변경유형</th>
             <th>변경 전</th>
             <th>변경 후</th>
+            <th>변경요청사유</th>
             <th>요청자</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
-            <tr><td colSpan={5}>변경 이력이 없습니다.</td></tr>
+            <tr><td colSpan={6}>변경 이력이 없습니다.</td></tr>
           ) : (
             rows.map((row, i) => (
               <tr key={`${row.at}-${i}`} style={{ cursor: "pointer" }} onClick={() => onOpenDetail(row)}>
                 <td>{row.at}</td>
                 <td>계약정보변경</td>
-                <td>{row.before}</td>
-                <td>{row.after}</td>
+                <td><div className="text-wrap-cell">{row.before}</div></td>
+                <td><div className="text-wrap-cell">{row.after}</div></td>
+                <td><div className="reason-cell">{row.reason || "-"}</div></td>
                 <td>관리자</td>
               </tr>
             ))
@@ -1293,7 +1295,7 @@ function ChangePage({ rows: contractRows }: { rows: ContractRowData[] }) {
     afterValue: "신한 110-987-****4321",
     requester: (contractRows || [])[i]?.name ?? "-",
     status: i % 3 === 0 ? "승인대기" : i % 3 === 1 ? "승인완료" : "반려",
-    memo: "",
+    memo: i % 4 === 0 ? "계좌번호 오타 수정 요청드립니다. 기존 계좌는 해지되었습니다." : i % 4 === 1 ? "계약자명 정정 (박지민 -> 박지명)" : i % 4 === 2 ? "추천인 변경 요청 (김영희 -> 이철수). 담당자 확인 완료되었습니다." : "",
     phone: `010-12${String(30 + i).padStart(2, "0")}-56${String(70 + i).padStart(2, "0")}`,
     accountNo: `110-987-****${String(4321 + i).padStart(4, "0")}`,
     fieldChanges: [
@@ -1489,21 +1491,33 @@ function ChangePage({ rows: contractRows }: { rows: ContractRowData[] }) {
       <section className="card">
         <div className="filters">{["계약종류", "계약상태", "추천인", "계약일자", "계좌검증"].map((x) => <div className="select" key={x}>{x}<ChevronDown size={15} /></div>)}</div>
         <table className="grid">
-          <thead><tr><th>계약번호</th><th>계약자명</th><th>근무여부</th><th>계약종류</th><th>추천인</th><th>계약일자</th><th>수당지급일</th><th>계약종료일</th><th>보증금액</th><th>수당</th><th>상태</th><th>계좌검증</th><th>상세</th></tr></thead>
+          <thead><tr><th>계약번호</th><th>계약자명</th><th>변경요청사유</th><th>변경내용</th><th>계약종류</th><th>추천인</th><th>계약일자</th><th>수당지급일</th><th>보증금액</th><th>수당</th><th>계좌검증</th><th>상세</th></tr></thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.id}>
                 <td>{row.contractNo}</td>
                 <td>{row.contractor}</td>
-                <td><input className="work-check" type="checkbox" checked={row.workFlag} readOnly /></td>
+                <td>
+                  <div className="reason-cell">
+                    {row.memo || "사유 미입력"}
+                    {row.status !== "승인대기" && (
+                      <div style={{ marginTop: "4px" }}>
+                        <span className={`badge ${statusClass(row.status)}`}>{row.status}</span>
+                      </div>
+                    )}
+                  </div>
+                </td>
+                <td>
+                  <div className="change-summary" title={row.fieldChanges.filter(f => f.before !== f.after).map(f => `${f.field}: ${f.before} -> ${f.after}`).join("\n")}>
+                    {row.fieldChanges.filter(f => f.before !== f.after).length}건 변경
+                  </div>
+                </td>
                 <td>{row.contractType}</td>
                 <td>{row.referrer}</td>
                 <td>{row.contractDate}</td>
                 <td>{row.payoutDate}</td>
-                <td>{row.endDate}</td>
                 <td>{row.depositAmount}</td>
                 <td>{row.allowanceAmount}</td>
-                <td><span className={`status-fixed ${statusClass(row.contractState)}`}>{row.contractState === "입금표 미등록" ? "입금표미등록" : row.contractState}</span></td>
                 <td><span className={`verify-fixed ${row.accountVerify.includes("오류") ? "err" : "ok"}`}>{row.accountVerify === "실명조회 오류" ? "실명조회오류" : row.accountVerify}</span></td>
                 <td><button className="icon-btn" onClick={() => openModal(row)}><Eye size={14} /></button></td>
               </tr>
@@ -1589,8 +1603,9 @@ function ChangePage({ rows: contractRows }: { rows: ContractRowData[] }) {
                 <tr>
                   <th>요청 사유</th>
                   <td colSpan={2}>
-                    <input
+                    <textarea
                       className="cell-input"
+                      style={{ height: "80px", padding: "8px", resize: "vertical" }}
                       value={editing.memo}
                       onChange={(e) => setEditing((prev) => prev ? ({ ...prev, memo: e.target.value }) : prev)}
                     />
@@ -1870,7 +1885,14 @@ function ContractDetail({ row, onBack }: { row: ContractRowData | null; onBack: 
           <tfoot>
             <tr>
               <th>요청 사유</th>
-              <td colSpan={2}><input className="cell-input" value={changeMemo} onChange={(e) => setChangeMemo(e.target.value)} /></td>
+              <td colSpan={2}>
+                <textarea 
+                  className="cell-input" 
+                  style={{ height: "80px", padding: "8px", resize: "vertical" }}
+                  value={changeMemo} 
+                  onChange={(e) => setChangeMemo(e.target.value)} 
+                />
+              </td>
             </tr>
           </tfoot>
         </table>
