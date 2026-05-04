@@ -47,7 +47,7 @@ type UserAccount = { id: number; email: string; role: "시스템관리자" | "�
 type ContractTypeRule = { id: number; deposit: number; workAmount4: number; workAmount2: number; nonWorkAmount: number };
 type ContractTypeRow = { id: number; name: string; contractYears: number; payoutMonths: number; rules: ContractTypeRule[] };
 
-const BANKS = ["KB국민은행","신한은행","우리은행","하나은행","NH농협은행","IBK기업은행","카카오뱅크","토스뱅크","SC제일은행","경남은행","광주은행","대구은행","부산은행","전북은행","제주은행","케이뱅크","수협은행","우체국","신협"];
+const BANKS = ["KB국민은행","신한은행","우리은행","하나은행","NH농협은행","IBK기업은행","카카오뱅크","토스뱅크","SC제일은행","경남은행","광주은행","대구은행","부산은행","전북은행","제주은행","케이뱅크","수협은행","우체국","신협","아이엠뱅크"];
 
 function numFmt(v: string): string {
   const n = v.replace(/[^\d]/g, "");
@@ -69,8 +69,7 @@ const menus: { key: MenuKey; label: string; icon: JSX.Element }[] = [
   { key: "dashboard", label: "대시보드", icon: <Home size={18} /> },
   { key: "contracts", label: "계약 관리", icon: <FileText size={18} /> },
   { key: "referrers", label: "추천인 관리", icon: <Users size={18} /> },
-  { key: "allowances", label: "수당 지급관리", icon: <Wallet size={18} /> },
-  { key: "account", label: "계좌 검증", icon: <Landmark size={18} /> },
+  { key: "allowances", label: "지급관리", icon: <Wallet size={18} /> },
   { key: "system", label: "시스템 관리", icon: <Settings size={18} /> }
 ];
 
@@ -340,6 +339,25 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
     if (!manualPayout) setPayoutDate(addMonths(contractDate, t?.payoutMonths ?? 2));
   };
 
+  const downloadAccountVerification = () => {
+    if (!bankName || !accountNo || !accountOwner) {
+      alert("은행, 계좌번호, 예금주를 모두 입력해주세요.");
+      return;
+    }
+    const headers = ["*입금은행", "*입금계좌", "고객관리성명", "*입금액"];
+    const rowData = [bankName, accountNo, accountOwner, "1"];
+    // UTF-8 BOM (\uFEFF) for Excel compatibility
+    const csvContent = "\uFEFF" + headers.join(",") + "\n" + rowData.join(",");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `계좌검증_${accountOwner}_${new Date().getTime()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div>
       <div className="head-with-btn"><PageHeader title="신규 계약 등록" desc="계약 정보를 입력하고 등록하세요." /><button className="line-btn" onClick={onBack}>목록으로</button></div>
@@ -413,7 +431,7 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
           </select>
           <input className="input-input" placeholder="계좌번호" value={accountNo} onChange={(e) => setAccountNo(e.target.value)} />
           <input className="input-input" placeholder="예금주" value={accountOwner} onChange={(e) => setAccountOwner(e.target.value)} />
-          <button className="primary-btn action-btn">계좌실명확인</button>
+          <button className="primary-btn action-btn" onClick={downloadAccountVerification}>계좌실명확인</button>
         </div>
       </section>
 
@@ -424,7 +442,10 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
         </div>
       </section>
 
-      <div className="actions"><button className="line-btn" onClick={onBack}>취소</button><button className="primary-btn">저장</button></div>
+      <div className="actions contract-create-actions">
+        <button className="line-btn create-action-btn" onClick={onBack}>취소</button>
+        <button className="primary-btn create-action-btn">저장</button>
+      </div>
     </div>
   );
 }
@@ -486,13 +507,20 @@ function DetailMemoTab() { return <section className="card"><div><div className=
 
 const API_BASE = "https://asia-northeast3-contractmanager-32072.cloudfunctions.net/api";
 
-type ReferrerRow = { id: number; name: string; org: string; phone: string; title: string; status: string };
+type ReferrerRow = { id: number; name: string; org: string; phone: string; title: string; email?: string; remarks?: string; status: string };
 
 function ReferrerPage() {
   const [referrerRows, setReferrerRows] = useState<ReferrerRow[]>([]);
   const [editingReferrer, setEditingReferrer] = useState<ReferrerRow | null>(null);
-  const [modalForm, setModalForm] = useState({ name: "", org: "", phone: "", title: "" });
-  const [referrerForm, setReferrerForm] = useState({ name: "", org: "", phone: "", title: "" });
+  const [modalForm, setModalForm] = useState({ name: "", org: "", phone: "", title: "", email: "", remarks: "" });
+  const [referrerForm, setReferrerForm] = useState({ name: "", org: "", phone: "", title: "", email: "", remarks: "" });
+
+  const [fName, setFName] = useState("");
+  const [fOrg, setFOrg] = useState("");
+  const [fEmail, setFEmail] = useState("");
+  const [fPhone, setFPhone] = useState("");
+  const [fTitle, setFTitle] = useState("");
+  const [fRemarks, setFRemarks] = useState("");
 
   const fetchReferrers = () => {
     fetch(`${API_BASE}/referrers`)
@@ -516,7 +544,14 @@ function ReferrerPage() {
 
   const openReferrerDetail = (row: ReferrerRow) => {
     setEditingReferrer(row);
-    setModalForm({ name: row.name, org: row.org, phone: row.phone, title: row.title });
+    setModalForm({ 
+      name: row.name, 
+      org: row.org, 
+      phone: row.phone, 
+      title: row.title, 
+      email: row.email || "", 
+      remarks: row.remarks || "" 
+    });
   };
 
   const saveReferrerDetail = () => {
@@ -524,7 +559,14 @@ function ReferrerPage() {
     fetch(`${API_BASE}/referrers/${editingReferrer.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: modalForm.name, org: modalForm.org, phone: modalForm.phone, title: modalForm.title })
+      body: JSON.stringify({ 
+        name: modalForm.name, 
+        org: modalForm.org, 
+        phone: modalForm.phone, 
+        title: modalForm.title, 
+        email: modalForm.email,
+        remarks: modalForm.remarks
+      })
     }).then(() => { fetchReferrers(); setEditingReferrer(null); }).catch(() => {});
   };
 
@@ -533,9 +575,33 @@ function ReferrerPage() {
     fetch(`${API_BASE}/referrers`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: referrerForm.name.trim(), org: referrerForm.org.trim(), phone: referrerForm.phone.trim(), title: referrerForm.title.trim() || "사원" })
-    }).then(() => { fetchReferrers(); setReferrerForm({ name: "", org: "", phone: "", title: "" }); }).catch(() => {});
+      body: JSON.stringify({ 
+        name: referrerForm.name.trim(), 
+        org: referrerForm.org.trim(), 
+        phone: referrerForm.phone.trim(), 
+        title: referrerForm.title.trim() || "사원",
+        email: referrerForm.email.trim(),
+        remarks: referrerForm.remarks.trim()
+      })
+    }).then(() => { fetchReferrers(); setReferrerForm({ name: "", org: "", phone: "", title: "", email: "", remarks: "" }); }).catch(() => {});
   };
+
+  const handleResetFilters = () => {
+    setFName(""); setFOrg(""); setFEmail(""); setFPhone(""); setFTitle(""); setFRemarks("");
+  };
+
+  // Get unique organizations for dropdown, sorted
+  const uniqueOrgs = Array.from(new Set(referrerRows.map(r => r.org))).sort((a, b) => a.localeCompare(b, "ko-KR"));
+
+  const filteredReferrers = referrerRows.filter((r) => {
+    if (fName && !r.name.includes(fName)) return false;
+    if (fOrg && !r.org.includes(fOrg)) return false;
+    if (fEmail && !(r.email || "").includes(fEmail)) return false;
+    if (fPhone && !r.phone.includes(fPhone)) return false;
+    if (fTitle && !r.title.includes(fTitle)) return false;
+    if (fRemarks && !(r.remarks || "").includes(fRemarks)) return false;
+    return true;
+  });
 
   return (
     <div>
@@ -552,27 +618,35 @@ function ReferrerPage() {
           </article>
         ))}
       </section>
+      <section className="card">
+        <div className="referrer-detailed-filter">
+          <label className="field"><span>소속</span>
+            <select className="input-input" value={fOrg} onChange={(e) => setFOrg(e.target.value)}>
+              <option value="">전체 소속</option>
+              {uniqueOrgs.map(org => <option key={org} value={org}>{org}</option>)}
+            </select>
+          </label>
+          <label className="field"><span>이름</span><input className="input-input" value={fName} onChange={(e) => setFName(e.target.value)} /></label>
+          <label className="field"><span>전화번호</span><input className="input-input" value={fPhone} onChange={(e) => setFPhone(e.target.value)} /></label>
+          <label className="field"><span>이메일</span><input className="input-input" value={fEmail} onChange={(e) => setFEmail(e.target.value)} /></label>
+          <label className="field"><span>직급</span><input className="input-input" value={fTitle} onChange={(e) => setFTitle(e.target.value)} /></label>
+          <div className="filter-actions-inline">
+            <button className="line-btn" onClick={handleResetFilters}>초기화</button>
+          </div>
+        </div>
+      </section>
+
       <section className="card two-col referrer-layout">
         <div>
-          <div className="referrer-filter-row">
-            <div className="search-box"><Search size={16} /> 이름, 소속, 전화번호 검색</div>
-            <div className="referrer-filters">
-              <div className="select">상태 전체 <ChevronDown size={15} /></div>
-              <div className="select">소속 전체 <ChevronDown size={15} /></div>
-              <button className="line-btn"><Search size={14} /> 상세 필터</button>
-            </div>
-          </div>
           <div className="referrer-table-scroll">
             <table className="grid referrer-grid">
-              <thead><tr><th>이름</th><th>소속</th><th>전화번호</th><th>직급</th><th>상태</th><th>상세</th></tr></thead>
+              <thead><tr><th>소속</th><th>이름</th><th>전화번호</th><th>이메일</th><th>직급</th></tr></thead>
               <tbody>
-                {referrerRows.length === 0
-                  ? <tr><td colSpan={6} style={{ textAlign: "center", color: "#8a97ac", padding: "24px" }}>등록된 추천인이 없습니다.</td></tr>
-                  : referrerRows.map((row) => (
+                {filteredReferrers.length === 0
+                  ? <tr><td colSpan={5} style={{ textAlign: "center", color: "#8a97ac", padding: "24px" }}>등록된 추천인이 없습니다.</td></tr>
+                  : filteredReferrers.map((row) => (
                     <tr key={row.id}>
-                      <td>{row.name}</td><td>{row.org}</td><td>{row.phone}</td><td>{row.title}</td>
-                      <td><span className={`badge ${row.status === "활성" ? "green" : "amber"}`}>{row.status}</span></td>
-                      <td><button className="icon-btn" onClick={() => openReferrerDetail(row)}><Eye size={14} /></button></td>
+                      <td>{row.org}</td><td>{row.name}</td><td>{row.phone}</td><td>{row.email || "-"}</td><td>{row.title}</td>
                     </tr>
                   ))
                 }
@@ -583,12 +657,14 @@ function ReferrerPage() {
         <div>
           <div className="card-title-sm">추천인 등록</div>
           <div className="side-form">
-            <label className="field"><span>이름<b className="req"> *</b></span><input className="input-input" placeholder="이름 입력" value={referrerForm.name} onChange={(e) => setReferrerForm((prev) => ({ ...prev, name: e.target.value }))} /></label>
             <label className="field"><span>소속<b className="req"> *</b></span><input className="input-input" placeholder="소속 입력" value={referrerForm.org} onChange={(e) => setReferrerForm((prev) => ({ ...prev, org: e.target.value }))} /></label>
+            <label className="field"><span>이름<b className="req"> *</b></span><input className="input-input" placeholder="이름 입력" value={referrerForm.name} onChange={(e) => setReferrerForm((prev) => ({ ...prev, name: e.target.value }))} /></label>
             <label className="field"><span>전화번호<b className="req"> *</b></span><input className="input-input" placeholder="010-0000-0000" inputMode="numeric" value={referrerForm.phone} onChange={(e) => setReferrerForm((prev) => ({ ...prev, phone: formatPhoneNumber(e.target.value) }))} /></label>
+            <label className="field"><span>이메일</span><input className="input-input" placeholder="example@email.com" value={referrerForm.email} onChange={(e) => setReferrerForm((prev) => ({ ...prev, email: e.target.value }))} /></label>
             <label className="field"><span>직급</span><input className="input-input" placeholder="직급 입력" value={referrerForm.title} onChange={(e) => setReferrerForm((prev) => ({ ...prev, title: e.target.value }))} /></label>
+            <label className="field"><span>비고</span><input className="input-input" placeholder="비고 입력" value={referrerForm.remarks} onChange={(e) => setReferrerForm((prev) => ({ ...prev, remarks: e.target.value }))} /></label>
           </div>
-          <div className="actions referrer-actions"><button className="line-btn" onClick={() => setReferrerForm({ name: "", org: "", phone: "", title: "" })}>취소</button><button className="primary-btn" onClick={saveReferrerForm}>저장</button></div>
+          <div className="actions referrer-actions"><button className="line-btn" onClick={() => setReferrerForm({ name: "", org: "", phone: "", title: "", email: "", remarks: "" })}>취소</button><button className="primary-btn" onClick={saveReferrerForm}>저장</button></div>
         </div>
       </section>
 
@@ -600,7 +676,9 @@ function ReferrerPage() {
               <label className="field"><span>이름<b className="req"> *</b></span><input className="input-input" value={modalForm.name} onChange={(e) => setModalForm((prev) => ({ ...prev, name: e.target.value }))} /></label>
               <label className="field"><span>소속<b className="req"> *</b></span><input className="input-input" value={modalForm.org} onChange={(e) => setModalForm((prev) => ({ ...prev, org: e.target.value }))} /></label>
               <label className="field"><span>전화번호<b className="req"> *</b></span><input className="input-input" inputMode="numeric" value={modalForm.phone} onChange={(e) => setModalForm((prev) => ({ ...prev, phone: formatPhoneNumber(e.target.value) }))} /></label>
+              <label className="field"><span>이메일</span><input className="input-input" value={modalForm.email} onChange={(e) => setModalForm((prev) => ({ ...prev, email: e.target.value }))} /></label>
               <label className="field"><span>직급</span><input className="input-input" value={modalForm.title} onChange={(e) => setModalForm((prev) => ({ ...prev, title: e.target.value }))} /></label>
+              <label className="field"><span>비고</span><input className="input-input" value={modalForm.remarks} onChange={(e) => setModalForm((prev) => ({ ...prev, remarks: e.target.value }))} /></label>
             </div>
             <div className="actions modal-actions">
               <button className="line-btn" onClick={() => setEditingReferrer(null)}>취소</button>
@@ -693,7 +771,9 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
       ].join("  ")
     );
 
-    const content = [header, separator, ...body].join("\r\n");
+    const sumPaid = filteredRows.reduce((sum, r) => sum + paidAmount(r.amount), 0);
+    const totalStr = padLeft("지급 총액: " + amountOnly(sumPaid), header.length);
+    const content = [header, separator, ...body, separator, totalStr].join("\r\n");
     const fileName = `수당지급목록_${endDate}_${startDate}.txt`;
 
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
@@ -774,10 +854,13 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
       </section>
 
       <section className="card">
-        <div className="card-title-sm">전체 {filteredRows.length.toLocaleString("ko-KR")}건</div>
+        <div className="group-head">
+          <div className="card-title-sm">전체 {filteredRows.length.toLocaleString("ko-KR")}건</div>
+          <div className="card-title-sm" style={{ fontWeight: 600 }}>지급 총액: {filteredRows.reduce((sum, r) => sum + paidAmount(r.amount), 0).toLocaleString("ko-KR")} 원</div>
+        </div>
         <table className="grid allowance-grid">
           <thead>
-            <tr><th>수당지급기준</th><th>계약자명</th><th>추천인</th><th>은행명</th><th>계좌번호</th><th>계약일자</th><th>계약종료일</th><th>보증금액</th><th className="text-center">수당</th><th className="text-center">지급금액</th></tr>
+            <tr><th>지급기준일</th><th>계약자명</th><th>추천인</th><th>은행명</th><th>계좌번호</th><th>계약일자</th><th>계약종료일</th><th>보증금액</th><th className="text-center">수당</th><th className="text-center">지급금액</th></tr>
           </thead>
           <tbody>
             {pagedRows.map((r) => (

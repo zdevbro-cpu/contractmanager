@@ -280,7 +280,7 @@ app.get("/referrers", async (_req, res) => {
   try {
     await ensureAppSchema();
     const result = await pool.query(
-      "select id, name, org, phone, title, status from referrers order by created_at desc"
+      "select id, name, org, phone, title, email, remarks, status from referrers order by created_at desc"
     );
     res.json({ rows: result.rows });
   } catch (error) {
@@ -289,7 +289,7 @@ app.get("/referrers", async (_req, res) => {
 });
 
 app.post("/referrers", async (req, res) => {
-  const { name, org, phone, title } = req.body ?? {};
+  const { name, org, phone, title, email, remarks } = req.body ?? {};
   if (!name || !org || !phone) {
     res.status(400).json({ message: "name, org, phone 필수" });
     return;
@@ -297,8 +297,8 @@ app.post("/referrers", async (req, res) => {
   try {
     await ensureAppSchema();
     const result = await pool.query(
-      "insert into referrers (name, org, phone, title) values ($1,$2,$3,$4) returning id, name, org, phone, title, status",
-      [name, org, phone, title || "사원"]
+      "insert into referrers (name, org, phone, title, email, remarks) values ($1,$2,$3,$4,$5,$6) returning id, name, org, phone, title, email, remarks, status",
+      [name, org, phone, title || "사원", email || null, remarks || null]
     );
     res.json({ ok: true, row: result.rows[0] });
   } catch (error) {
@@ -308,7 +308,7 @@ app.post("/referrers", async (req, res) => {
 
 app.put("/referrers/:id", async (req, res) => {
   const { id } = req.params;
-  const { name, org, phone, title, status } = req.body ?? {};
+  const { name, org, phone, title, email, remarks, status } = req.body ?? {};
   try {
     await ensureAppSchema();
     await pool.query(
@@ -317,10 +317,12 @@ app.put("/referrers/:id", async (req, res) => {
         org = coalesce($3, org),
         phone = coalesce($4, phone),
         title = coalesce($5, title),
-        status = coalesce($6, status),
+        email = coalesce($6, email),
+        remarks = coalesce($7, remarks),
+        status = coalesce($8, status),
         updated_at = now()
        where id = $1`,
-      [id, name ?? null, org ?? null, phone ?? null, title ?? null, status ?? null]
+      [id, name ?? null, org ?? null, phone ?? null, title ?? null, email ?? null, remarks ?? null, status ?? null]
     );
     res.json({ ok: true });
   } catch (error) {
