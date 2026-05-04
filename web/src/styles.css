@@ -122,8 +122,33 @@ button { font-family: inherit; }
 .contract-filter-bar .primary-btn { flex-shrink: 0; min-height: 38px; min-width: 130px; justify-content: center; white-space: nowrap; }
 .pager-right { display: flex; gap: 6px; align-items: center; }
 .pager-ellipsis { padding: 0 4px; color: #8a97ac; }
-.search-box { flex: 1; border: 1px solid #dfe6f3; border-radius: 10px; padding: 6px 10px; color: #8a97ac; display: flex; gap: 8px; align-items: center; min-height: 38px; }
-.search-box .input-input { border: 0; padding: 0; min-height: 0; background: transparent; }
+.search-box {
+  flex: 1;
+  border: 1px solid #dfe6f3;
+  border-radius: 12px;
+  padding: 0 12px;
+  color: #8a97ac;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 42px;
+  background: #fff;
+  transition: all 0.2s ease;
+}
+.search-box:focus-within {
+  border-color: #1c75ff;
+  box-shadow: 0 0 0 3px rgba(28, 117, 255, 0.1);
+}
+.search-box .input-input {
+  border: none !important;
+  padding: 0 !important;
+  margin: 0;
+  height: 100%;
+  flex: 1;
+  background: transparent !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
 .filters { display: grid; gap: 10px; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-bottom: 10px; }
 .filters.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .filters.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -223,7 +248,21 @@ button { font-family: inherit; }
 .action-btn { height: 44px; min-height: 44px; justify-content: center; }
 .field span { display: block; margin-bottom: 6px; color: #5e6a83; font-size: 12px; }
 .input { border: 1px solid #dfe6f3; border-radius: 10px; min-height: 40px; padding: 10px 12px; color: #8a97ac; }
-.input-input { border: 1px solid #dfe6f3; border-radius: 10px; min-height: 40px; padding: 10px 12px; color: #1a2438; width: 100%; background: #fff; }
+.input-input {
+  border: 1px solid #dfe6f3;
+  border-radius: 10px;
+  min-height: 40px;
+  padding: 0 12px;
+  color: #1a2438;
+  width: 100%;
+  background: #fff;
+  outline: none;
+  transition: all 0.2s ease;
+}
+.input-input:focus {
+  border-color: #1c75ff;
+  box-shadow: 0 0 0 3px rgba(28, 117, 255, 0.1);
+}
 .basic-grid .input,
 .basic-grid .input-input {
   height: 44px;
