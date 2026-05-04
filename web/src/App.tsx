@@ -1799,7 +1799,10 @@ export function App() {
           <label className="field"><span>이메일</span><input className="input-input" type="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} placeholder="admin@contractmanager.com" /></label>
           <label className="field"><span>비밀번호</span><input className="input-input" type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} placeholder="비밀번호" onKeyDown={(e) => { if (e.key === "Enter") doLogin(); }} /></label>
           {loginError ? <div className="login-error">{loginError}</div> : null}
-          <button className="primary-btn login-btn" onClick={doLogin}>로그인</button>
+          <div className="modal-actions" style={{ marginTop: "10px" }}>
+            <button className="line-btn" onClick={() => { setLoginEmail(""); setLoginPassword(""); setLoginError(""); }}>취소</button>
+            <button className="primary-btn" onClick={doLogin}>로그인</button>
+          </div>
         </section>
       </div>
     );
