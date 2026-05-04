@@ -16,7 +16,8 @@ import {
   Trash2,
   UserRound,
   Users,
-  Wallet
+  Wallet,
+  X
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ChangeEvent, type Dispatch, type SetStateAction } from "react";
 
@@ -745,7 +746,7 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
           </label>
           <div className="field">
             <span>계약자명</span>
-            <div className="search-box" style={{ background: "#fff" }}>
+            <div className="search-box" style={{ background: "#fff", position: "relative" }}>
               <Search size={16} />
               <input 
                 className="input-input" 
@@ -754,6 +755,15 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
                 value={contractorFilter} 
                 onChange={(e) => setContractorFilter(e.target.value)} 
               />
+              {contractorFilter && contractorFilter !== "전체" && (
+                <button 
+                  className="icon-btn" 
+                  style={{ border: "none", padding: "4px", background: "transparent", color: "#8a97ac", cursor: "pointer" }}
+                  onClick={() => setContractorFilter("전체")}
+                >
+                  <X size={14} />
+                </button>
+              )}
             </div>
             <datalist id="contractor-names">
               <option value="전체" />
