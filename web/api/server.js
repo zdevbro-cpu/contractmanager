@@ -65,6 +65,10 @@ function normalizeRows(rows) {
     ref: row.referrer_name ?? "",
     bankName: row.bank_name ?? "",
     accountNo: row.account_no ?? "",
+    paymentMethod: row.payment_method ?? "",
+    accountHolder: row.account_holder ?? "",
+    residentRegistrationNumber: row.resident_registration_number ?? "",
+    remarks: row.remarks ?? "",
     type: row.contract_name ?? "",
     status: "정상운영",
     verify: "검증완료",
@@ -92,6 +96,10 @@ async function ensureAppSchema() {
   await safeAlter("alter table contracts add column if not exists referrer_name text");
   await safeAlter("alter table contracts add column if not exists bank_name text");
   await safeAlter("alter table contracts add column if not exists account_no text");
+  await safeAlter("alter table contracts add column if not exists payment_method text");
+  await safeAlter("alter table contracts add column if not exists account_holder text");
+  await safeAlter("alter table contracts add column if not exists resident_registration_number text");
+  await safeAlter("alter table contracts add column if not exists remarks text");
   await pool.query(`
     create table if not exists contract_types (
       id bigserial primary key,
@@ -157,6 +165,10 @@ app.get("/api/contracts", async (_req, res) => {
         referrer_name,
         bank_name,
         account_no,
+        payment_method,
+        account_holder,
+        resident_registration_number,
+        remarks,
         created_at
       from contracts
       where contractor_name is not null
@@ -187,6 +199,10 @@ app.put("/api/contracts/:contractNo", async (req, res) => {
         referrer_name = coalesce($9, referrer_name),
         bank_name = coalesce($10, bank_name),
         account_no = coalesce($11, account_no),
+        payment_method = coalesce($12, payment_method),
+        account_holder = coalesce($13, account_holder),
+        resident_registration_number = coalesce($14, resident_registration_number),
+        remarks = coalesce($15, remarks),
         updated_at = now()
       where contract_no = $1
       returning contract_no
@@ -202,7 +218,11 @@ app.put("/api/contracts/:contractNo", async (req, res) => {
         body.allowanceAmountValue ?? null,
         body.ref ?? null,
         body.bankName ?? null,
-        body.accountNo ?? null
+        body.accountNo ?? null,
+        body.paymentMethod ?? null,
+        body.accountHolder ?? null,
+        body.residentRegistrationNumber ?? null,
+        body.remarks ?? null
       ]
     );
     if (result.rowCount === 0) {

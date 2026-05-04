@@ -21,10 +21,18 @@ create table if not exists contracts (
   contractor_name text not null,
   first_allowance_date date not null,
   contract_date date,
+  contract_end_date date,
   deposit_amount numeric(15,0),
   work_days text,
   work_allowance numeric(15,0),
+  payment_method text,
+  bank_name text,
+  account_no text,
+  account_holder text,
+  resident_registration_number text,
   phone text,
+  referrer_name text,
+  remarks text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

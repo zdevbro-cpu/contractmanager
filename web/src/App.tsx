@@ -763,7 +763,7 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
         <div className="card-title-sm">전체 {filteredRows.length.toLocaleString("ko-KR")}건</div>
         <table className="grid allowance-grid">
           <thead>
-            <tr><th>수당지급기준</th><th>계약자명</th><th>추천인</th><th>은행명</th><th>계좌번호</th><th>계약일자</th><th>계약종료일</th><th>보증금액</th><th>수당</th><th>지급금액</th></tr>
+            <tr><th>수당지급기준</th><th>계약자명</th><th>추천인</th><th>은행명</th><th>계좌번호</th><th>계약일자</th><th>계약종료일</th><th>보증금액</th><th className="text-center">수당</th><th className="text-center">지급금액</th></tr>
           </thead>
           <tbody>
             {pagedRows.map((r) => (
@@ -791,23 +791,7 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
         </div>
       </section>
 
-      <section className="allowance-kpis bottom-kpis four">
-        {[
-          { label: "합계금액", value: amountText(totalAmount), sub: "전체 지급 대상의 수당 총액", icon: <Wallet size={24} />, tone: "blue" },
-          { label: "지급확정 금액", value: amountText(confirmedAmount), sub: "지급이 확정된 수당", icon: <CircleDollarSign size={24} />, tone: "green" },
-          { label: "지급완료 금액", value: amountText(completedAmount), sub: "지급이 완료된 수당", icon: <CheckCircle2 size={24} />, tone: "violet" },
-          { label: "지급보류 금액", value: amountText(holdAmount), sub: "대기/변경 등 지급 보류", icon: <Landmark size={24} />, tone: "orange" }
-        ].map((item) => (
-          <article key={item.label} className="referrer-kpi">
-            <div className={`referrer-kpi-icon ${item.tone}`}>{item.icon}</div>
-            <div className="referrer-kpi-body">
-              <div className="referrer-kpi-label">{item.label}</div>
-              <div className="referrer-kpi-value">{item.value}</div>
-              <div className="referrer-kpi-sub">{item.sub}</div>
-            </div>
-          </article>
-        ))}
-      </section>
+
     </div>
   );
 }
@@ -1730,7 +1714,7 @@ export function App() {
 
   const [rows, setRows] = useState<ContractRowData[]>([]);
   useEffect(() => {
-    fetch('https://asia-northeast3-contractmanager-32072.cloudfunctions.net/api/contracts')
+    fetch('/api/contracts')
       .then(res => res.json())
       .then(resData => {
         setRows(Array.isArray(resData.rows) ? resData.rows : []);
