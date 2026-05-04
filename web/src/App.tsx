@@ -43,7 +43,7 @@ type ContractRowData = {
   residentRegistrationNumber?: string;
 };
 
-type MenuKey = "dashboard" | "contracts" | "referrers" | "allowances" | "account" | "system";
+type MenuKey = "dashboard" | "contracts" | "appointment" | "referrers" | "allowances" | "salaries" | "account" | "changes" | "system";
 type ContractView = "list" | "create" | "detail";
 type DetailTab = "basic" | "document" | "allowance" | "account" | "history" | "memo";
 type UserAccount = { id: number; email: string; role: "시스템관리자" | "운영자"; state: "활성" | "비활성"; password: string };
@@ -68,13 +68,41 @@ function phoneFmt(v: string): string {
   return n.slice(0, 3) + "-" + n.slice(3, 7) + "-" + n.slice(7);
 }
 
-const menus: { key: MenuKey; label: string; icon: JSX.Element }[] = [
+const menus: { key: MenuKey; label: string; icon: JSX.Element; group?: string }[] = [
   { key: "dashboard", label: "대시보드", icon: <Home size={18} /> },
-  { key: "contracts", label: "계약 관리", icon: <FileText size={18} /> },
+  { key: "contracts", label: "점장점주계약", icon: <FileText size={18} />, group: "계약관리" },
+  { key: "appointment", label: "임용계약", icon: <Plus size={18} />, group: "계약관리" },
   { key: "referrers", label: "추천인 관리", icon: <Users size={18} /> },
-  { key: "allowances", label: "지급관리", icon: <Wallet size={18} /> },
+  { key: "allowances", label: "수당지급관리", icon: <Wallet size={18} />, group: "지급관리" },
+  { key: "salaries", label: "급여지급관리", icon: <CircleDollarSign size={18} />, group: "지급관리" },
   { key: "system", label: "시스템 관리", icon: <Settings size={18} /> }
 ];
+
+function AppointmentPage() {
+  return (
+    <div>
+      <PageHeader title="임용계약 관리" desc="임용계약 목록 및 신규 계약을 관리합니다. (개발 예정)" />
+      <section className="card">
+        <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>
+          준비 중인 메뉴입니다.
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SalaryPage() {
+  return (
+    <div>
+      <PageHeader title="급여지급관리" desc="임직원 급여 정산 및 지급 현황을 관리합니다. (개발 예정)" />
+      <section className="card">
+        <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>
+          준비 중인 메뉴입니다.
+        </div>
+      </section>
+    </div>
+  );
+}
 
 function formatDate(date: Date) {
   const y = date.getFullYear();
@@ -2188,8 +2216,10 @@ export function App() {
             if (contractView === "create") return <ContractCreate onBack={() => { loadContracts(); setContractView("list"); }} />;
             if (contractView === "detail") return <ContractDetail row={selectedContract} onBack={() => { loadContracts(); setContractView("list"); }} authUser={authUser} onUpdate={(updated) => setSelectedContract(updated)} />;
           }
+          if (menu === "appointment") return <AppointmentPage />;
           if (menu === "referrers") return <ReferrerPage />;
           if (menu === "allowances") return <AllowancePage rows={contracts} />;
+          if (menu === "salaries") return <SalaryPage />;
           if (menu === "account") return <AccountPage rows={contracts} />;
           if (menu === "changes") return <ChangePage rows={contracts} authUser={authUser} onRefresh={loadContracts} />;
           if (menu === "system") return <SystemPage users={users} setUsers={setUsers} onAddUserWithTempPassword={addUserWithTempPassword} onResetPassword={resetPassword} authUser={authUser} />;
@@ -2221,6 +2251,34 @@ export function App() {
     );
   }
 
+  const renderNavItems = () => {
+    const items: JSX.Element[] = [];
+    let lastGroup = "";
+
+    menus.forEach((m) => {
+      if (m.group && m.group !== lastGroup) {
+        items.push(<div key={`group-${m.group}`} className="sidebar-group-label">{m.group}</div>);
+        lastGroup = m.group;
+      } else if (!m.group && lastGroup) {
+        lastGroup = "";
+      }
+
+      items.push(
+        <button
+          key={m.key}
+          className={`nav ${menu === m.key ? "active" : ""}`}
+          onClick={() => {
+            setMenu(m.key);
+            if (m.key !== "contracts") setContractView("list");
+          }}
+        >
+          {m.icon}<span>{m.label}</span>
+        </button>
+      );
+    });
+    return items;
+  };
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -2228,18 +2286,7 @@ export function App() {
           <img className="brand-logo" src="/logo.png" alt="LAS 로고" />
           <div className="brand">LAS계약관리</div>
         </div>
-        {menus.map((m) => (
-          <button
-            key={m.key}
-            className={`nav ${menu === m.key ? "active" : ""}`}
-            onClick={() => {
-              setMenu(m.key);
-              if (m.key !== "contracts") setContractView("list");
-            }}
-          >
-            {m.icon}<span>{m.label}</span>
-          </button>
-        ))}
+        {renderNavItems()}
       </aside>
       <div className="main-wrap">
         <header className="topbar"><Menu size={20} /><h2>{menus.find((m) => m.key === menu)?.label}</h2><div className="spacer" /><Bell size={18} /><div className="user"><UserRound size={16} /> {authUser.email} ({authUser.role})</div></header>
