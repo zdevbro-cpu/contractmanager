@@ -114,10 +114,17 @@ function getTodayText() {
   return `${y}-${m}-${d}`;
 }
 
-function makeTempPassword() {
-  return `Cm!${Math.random().toString(36).slice(2, 6)}${Math.floor(Math.random() * 900 + 100)}`;
+function formatDateTime(v: string) {
+  if (!v) return "-";
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return v;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const h = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${y}-${m}-${day} ${h}:${min}`;
 }
-
 
 function statusClass(s: string) {
   if (s.includes("정상") || s.includes("완료")) return "green";
@@ -514,8 +521,8 @@ function DetailHistoryTab({
   rows,
   onOpenDetail
 }: {
-  rows: Array<{ at: string; before: string; after: string; reason: string; changedFields: Array<{ field: string; before: string; after: string }> }>;
-  onOpenDetail: (row: { at: string; before: string; after: string; reason: string; changedFields: Array<{ field: string; before: string; after: string }> }) => void;
+  rows: Array<{ at: string; before: string; after: string; reason: string; requester: string; changedFields: Array<{ field: string; before: string; after: string }> }>;
+  onOpenDetail: (row: { at: string; before: string; after: string; reason: string; requester: string; changedFields: Array<{ field: string; before: string; after: string }> }) => void;
 }) {
   return (
     <section className="card">
@@ -523,11 +530,11 @@ function DetailHistoryTab({
       <table className="grid">
         <thead>
           <tr>
-            <th>변경일시</th>
+            <th>요청일시</th>
             <th>변경유형</th>
             <th>변경 전</th>
             <th>변경 후</th>
-            <th>변경요청사유</th>
+            <th>요청사유</th>
             <th>요청자</th>
           </tr>
         </thead>
@@ -537,12 +544,12 @@ function DetailHistoryTab({
           ) : (
             rows.map((row, i) => (
               <tr key={`${row.at}-${i}`} style={{ cursor: "pointer" }} onClick={() => onOpenDetail(row)}>
-                <td>{row.at}</td>
+                <td>{formatDateTime(row.at)}</td>
                 <td>계약정보변경</td>
                 <td><div className="text-wrap-cell">{row.before}</div></td>
                 <td><div className="text-wrap-cell">{row.after}</div></td>
                 <td><div className="reason-cell">{row.reason || "-"}</div></td>
-                <td>관리자</td>
+                <td>{row.requester || "관리자"}</td>
               </tr>
             ))
           )}
@@ -551,7 +558,98 @@ function DetailHistoryTab({
     </section>
   );
 }
-function DetailMemoTab() { return <section className="card"><div><div className="card-title-sm">메모 작성</div><div className="input memo-box">메모를 입력하세요...</div><div className="actions detail-file-actions"><button className="line-btn">파일 첨부</button><button className="primary-btn">등록</button></div></div></section>; }
+function DetailMemoTab({ row, onRefresh }: { row: ContractRowData | null; onRefresh?: () => void }) {
+  const [memos, setMemos] = useState<Array<{ slotIndex: number; content: string; updatedAt: string }>>([]);
+  const [localMemos, setLocalMemos] = useState<string[]>(["", "", "", "", ""]);
+  const [savingSlot, setSavingSlot] = useState<number | null>(null);
+
+  const fetchMemos = () => {
+    if (!row?.id) return;
+    fetch(`/api/contracts/${row.id}/memos`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.rows) {
+          setMemos(data.rows);
+          const nextLocal = ["", "", "", "", ""];
+          data.rows.forEach((m: any) => {
+            if (m.slotIndex >= 0 && m.slotIndex < 5) nextLocal[m.slotIndex] = m.content;
+          });
+          setLocalMemos(nextLocal);
+        }
+      });
+  };
+
+  useEffect(() => { fetchMemos(); }, [row?.id]);
+
+  const handleSave = async (slotIndex: number) => {
+    if (!row?.id) return;
+    setSavingSlot(slotIndex);
+    try {
+      const res = await fetch(`/api/contracts/${row.id}/memos`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slotIndex, content: localMemos[slotIndex] })
+      });
+      if (res.ok) {
+        alert(`${slotIndex + 1}번 행 메모가 저장되었습니다.`);
+        fetchMemos();
+        if (onRefresh) onRefresh();
+      }
+    } finally { setSavingSlot(null); }
+  };
+
+  return (
+    <section className="card">
+      <div className="card-title-sm">메모 관리 (5개 행)</div>
+      <table className="grid" style={{ tableLayout: "fixed" }}>
+        <thead>
+          <tr>
+            <th style={{ width: "120px" }}>No</th>
+            <th style={{ width: "150px" }}>최종수정일</th>
+            <th>메모 내용</th>
+            <th style={{ width: "100px" }}>관리</th>
+          </tr>
+        </thead>
+        <tbody>
+          {[0, 1, 2, 3, 4].map((idx) => {
+            const dbMemo = memos.find(m => m.slotIndex === idx);
+            return (
+              <tr key={idx}>
+                <td style={{ textAlign: "center", fontWeight: 600 }}>{idx + 1}</td>
+                <td style={{ textAlign: "center", color: "#66758f", fontSize: "14px" }}>
+                  {dbMemo?.updatedAt ? String(dbMemo.updatedAt).slice(0, 10) : "-"}
+                </td>
+                <td style={{ padding: "0" }}>
+                  <textarea
+                    className="input memo-box"
+                    style={{ border: "0", boxShadow: "none", minHeight: "80px", marginBottom: "0", padding: "12px", width: "100%", background: "#fff", resize: "none" }}
+                    value={localMemos[idx]}
+                    onChange={(e) => {
+                      const next = [...localMemos];
+                      next[idx] = e.target.value;
+                      setLocalMemos(next);
+                    }}
+                    placeholder={`${idx + 1}번 메모를 입력하세요...`}
+                  />
+                </td>
+                <td style={{ textAlign: "center" }}>
+                  <button
+                    className="primary-btn"
+                    style={{ padding: "6px 12px", fontSize: "13px" }}
+                    onClick={() => handleSave(idx)}
+                    disabled={savingSlot === idx}
+                  >
+                    {savingSlot === idx ? "..." : "저장"}
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </section>
+  );
+}
 
 const API_BASE = "https://asia-northeast3-contractmanager-32072.cloudfunctions.net/api";
 
@@ -607,7 +705,9 @@ function ReferrerPage() {
       phone: row.phone, 
       title: row.title, 
       email: row.email || "", 
-      remarks: row.remarks || "" 
+      remarks: row.remarks || "",
+      createdAt: row.created_at ? String(row.created_at).slice(0, 10) : "",
+      updatedAt: row.updated_at ? String(row.updated_at).slice(0, 10) : ""
     });
     setIsModalNewOrg(false);
   };
@@ -648,7 +748,6 @@ function ReferrerPage() {
     setFName(""); setFOrg(""); setFEmail(""); setFPhone(""); setFTitle(""); setFRemarks("");
   };
 
-  // Get unique organizations for dropdown, sorted
   const uniqueOrgs = Array.from(new Set(referrerRows.map(r => r.org))).sort((a, b) => a.localeCompare(b, "ko-KR"));
 
   const filteredReferrers = referrerRows.filter((r) => {
@@ -772,6 +871,7 @@ function ReferrerPage() {
               <label className="field"><span>전화번호<b className="req"> *</b></span><input className="input-input" inputMode="numeric" value={modalForm.phone} onChange={(e) => setModalForm((prev) => ({ ...prev, phone: formatPhoneNumber(e.target.value) }))} /></label>
               <label className="field"><span>이메일</span><input className="input-input" value={modalForm.email} onChange={(e) => setModalForm((prev) => ({ ...prev, email: e.target.value }))} /></label>
               <label className="field"><span>직급</span><input className="input-input" value={modalForm.title} onChange={(e) => setModalForm((prev) => ({ ...prev, title: e.target.value }))} /></label>
+              <label className="field"><span>등록일/수정일</span><input className="input-input" disabled value={`${modalForm.createdAt} / ${modalForm.updatedAt}`} /></label>
             </div>
             <div className="actions modal-actions">
               <button className="line-btn" onClick={() => setEditingReferrer(null)}>취소</button>
@@ -846,27 +946,16 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
     const accountWidth = 18;
     const amountWidth = 12;
 
-    const header = [
-      padRight("계약자명", nameWidth),
-      padRight("은행명", bankWidth),
-      padRight("계좌번호", accountWidth),
-      padLeft("지급금액", amountWidth)
-    ].join("  ");
-
-    const separator = "-".repeat(header.length);
-
     const body = filteredRows.map((r) =>
       [
-        padRight(r.name, nameWidth),
-        padRight(r.bankName, bankWidth),
-        padRight(r.accountNo, accountWidth),
-        padLeft(amountOnly(paidAmount(r.amount)), amountWidth)
-      ].join("  ")
+        r.name,
+        amountOnly(paidAmount(r.amount)),
+        r.bankName,
+        r.accountNo
+      ].join(" ")
     );
 
-    const sumPaid = filteredRows.reduce((sum, r) => sum + paidAmount(r.amount), 0);
-    const totalStr = padLeft("지급 총액: " + amountOnly(sumPaid), header.length);
-    const content = [header, separator, ...body, separator, totalStr].join("\r\n");
+    const content = body.join("\r\n");
     const fileName = `수당지급목록_${endDate}_${startDate}.txt`;
 
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
@@ -1163,7 +1252,7 @@ function AccountPage({ rows }: { rows: ContractRowData[] }) {
   const downloadTemplate = () => {
     const headers = ["계약번호", "계약자명", "은행명", "계좌번호", "예금주명"];
     const sampleRows = [
-      ["LASM-20240520-001", "김영수", "신한은행", "110-1234-123456", "김영수"],
+      ["LASM-20240520-001", "홍길동", "신한은행", "110-1234-123456", "홍길동"],
       ["LASM-20240519-002", "박지민", "신한은행", "110-1234-123457", "박지민"]
     ];
     const csvEscape = (v: string) => `"${String(v).replaceAll('"', '""')}"`;
@@ -1231,7 +1320,7 @@ function AccountPage({ rows }: { rows: ContractRowData[] }) {
 }
 
 
-function ChangePage({ rows: contractRows }: { rows: ContractRowData[] }) {
+function ChangePage({ rows: contractRows, authUser }: { rows: ContractRowData[]; authUser: any }) {
   type FieldChange = {
     field: string;
     before: string;
@@ -1271,7 +1360,6 @@ function ChangePage({ rows: contractRows }: { rows: ContractRowData[] }) {
     action: string;
     beforeValue: string;
     afterValue: string;
-    actor: string;
     result: string;
   };
 
@@ -1293,8 +1381,8 @@ function ChangePage({ rows: contractRows }: { rows: ContractRowData[] }) {
     changeType: "계좌정보변경",
     beforeValue: "신한 110-123-****5678",
     afterValue: "신한 110-987-****4321",
-    requester: (contractRows || [])[i]?.name ?? "-",
-    status: i % 3 === 0 ? "승인대기" : i % 3 === 1 ? "승인완료" : "반려",
+    requester: authUser?.email || "시스템",
+    reason: i % 4 === 0 ? "계좌번호 오타 수정 요청" : i % 4 === 1 ? "계약자명 정정" : i % 4 === 2 ? "추천인 변경 요청" : "기타",
     memo: i % 4 === 0 ? "계좌번호 오타 수정 요청드립니다. 기존 계좌는 해지되었습니다." : i % 4 === 1 ? "계약자명 정정 (박지민 -> 박지명)" : i % 4 === 2 ? "추천인 변경 요청 (김영희 -> 이철수). 담당자 확인 완료되었습니다." : "",
     phone: `010-12${String(30 + i).padStart(2, "0")}-56${String(70 + i).padStart(2, "0")}`,
     accountNo: `110-987-****${String(4321 + i).padStart(4, "0")}`,
@@ -1491,7 +1579,7 @@ function ChangePage({ rows: contractRows }: { rows: ContractRowData[] }) {
       <section className="card">
         <div className="filters">{["계약종류", "계약상태", "추천인", "계약일자", "계좌검증"].map((x) => <div className="select" key={x}>{x}<ChevronDown size={15} /></div>)}</div>
         <table className="grid">
-          <thead><tr><th>계약번호</th><th>계약자명</th><th>변경요청사유</th><th>변경내용</th><th>계약종류</th><th>추천인</th><th>계약일자</th><th>수당지급일</th><th>보증금액</th><th>수당</th><th>계좌검증</th><th>상세</th></tr></thead>
+          <thead><tr><th>계약번호</th><th>계약자명</th><th>요청사유</th><th>변경내용</th><th>계약종류</th><th>추천인</th><th>계약일자</th><th>수당지급일</th><th>보증금액</th><th>수당</th><th>계좌검증</th><th>상세</th></tr></thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.id}>
@@ -1529,14 +1617,14 @@ function ChangePage({ rows: contractRows }: { rows: ContractRowData[] }) {
       <section className="card">
         <div className="card-title-sm">변경 이력</div>
         <table className="grid">
-          <thead><tr><th>일시</th><th>계약번호</th><th>처리</th><th>변경 전</th><th>변경 후</th><th>처리자</th><th>결과</th></tr></thead>
+          <thead><tr><th>일시</th><th>계약번호</th><th>처리</th><th>변경 전</th><th>변경 후</th><th>결과</th></tr></thead>
           <tbody>
             {historyRows.length === 0 ? (
               <tr><td colSpan={7}>변경 이력이 없습니다.</td></tr>
             ) : (
               historyRows.map((h) => (
                 <tr key={h.id}>
-                  <td>{h.at}</td><td>{h.contractNo}</td><td>{h.action}</td><td>{h.beforeValue}</td><td>{h.afterValue}</td><td>{h.actor}</td><td>{h.result}</td>
+                  <td>{h.at}</td><td>{h.contractNo}</td><td>{h.action}</td><td>{h.beforeValue}</td><td>{h.afterValue}</td><td><span className={`badge ${h.result === "승인" ? "green" : "red"}`}>{h.result}</span></td>
                 </tr>
               ))
             )}
@@ -1788,7 +1876,7 @@ function SystemPage({
   );
 }
 
-function ContractDetail({ row, onBack }: { row: ContractRowData | null; onBack: () => void }) {
+function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowData | null; onBack: () => void; authUser: any; onUpdate?: (r: ContractRowData) => void }) {
   const [tab, setTab] = useState<DetailTab>("basic");
   const [changeOpen, setChangeOpen] = useState(false);
   const [changeMemo, setChangeMemo] = useState("");
@@ -1823,6 +1911,26 @@ function ContractDetail({ row, onBack }: { row: ContractRowData | null; onBack: 
     { field: "계좌번호", before: row?.accountNo || "-", after: row?.accountNo || "-" },
     { field: "예금주명", before: row?.accountHolder || "-", after: row?.accountHolder || "-" }
   ]);
+  
+  useEffect(() => {
+    setChangeFields([
+      { field: "계약번호", before: row?.no ?? "-", after: row?.no ?? "-", readOnlyAfter: true },
+      { field: "계약자명", before: row?.name ?? "-", after: row?.name ?? "-" },
+      { field: "추천인명", before: row?.ref || "-", after: row?.ref || "-" },
+      { field: "계약종류", before: row?.type ?? "-", after: row?.type ?? "-", readOnlyAfter: true },
+      { field: "계약일자", before: row?.contractDate ?? "", after: row?.contractDate ?? "" },
+      { field: "수당지급일", before: row?.payoutDate ?? "", after: row?.payoutDate ?? "" },
+      { field: "계약종료일", before: row?.endDate ?? "", after: row?.endDate ?? "" },
+      { field: "보증금액", before: row?.depositAmount || "-", after: row?.depositAmount || "-" },
+      { field: "수당", before: row?.allowanceAmount || "-", after: row?.allowanceAmount || "-" },
+      { field: "근무여부", before: "근무", after: "근무" },
+      { field: "연락처", before: row?.phone || "-", after: row?.phone || "-" },
+      { field: "주민번호", before: row?.residentRegistrationNumber || "-", after: row?.residentRegistrationNumber || "-" },
+      { field: "은행명", before: row?.bankName || "-", after: row?.bankName || "-" },
+      { field: "계좌번호", before: row?.accountNo || "-", after: row?.accountNo || "-" },
+      { field: "예금주명", before: row?.accountHolder || "-", after: row?.accountHolder || "-" }
+    ]);
+  }, [row]);
 
   const saveChangeRequest = async () => {
     const changed = changeFields.filter((x) => x.before !== x.after);
@@ -1833,7 +1941,8 @@ function ContractDetail({ row, onBack }: { row: ContractRowData | null; onBack: 
     
     if (row?.id) {
       try {
-        const res = await fetch(`/api/contracts/${row.id}/history`, {
+        // 1. Update History
+        const histRes = await fetch(`/api/contracts/${row.id}/history`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1843,11 +1952,57 @@ function ContractDetail({ row, onBack }: { row: ContractRowData | null; onBack: 
             changedFields: changed
           })
         });
-        if (res.ok) {
-          setChangeHistoryRows((prev) => [{ at, before: beforeText, after: afterText, reason: changeMemo || "-", changedFields: changed }, ...prev]);
+
+        // 2. Update Actual Contract Data
+        const updateBody: any = {};
+        changed.forEach(f => {
+          if (f.field === "계약자명") updateBody.name = f.after;
+          if (f.field === "추천인명") updateBody.ref = f.after;
+          if (f.field === "계약일자") updateBody.contractDate = f.after;
+          if (f.field === "수당지급일") updateBody.payoutDate = f.after;
+          if (f.field === "계약종료일") updateBody.endDate = f.after;
+          if (f.field === "보증금액") updateBody.depositAmountValue = Number(f.after.replace(/[^0-9]/g, ""));
+          if (f.field === "수당") updateBody.allowanceAmountValue = Number(f.after.replace(/[^0-9]/g, ""));
+          if (f.field === "연락처") updateBody.phone = f.after;
+          if (f.field === "주민번호") updateBody.residentRegistrationNumber = f.after;
+          if (f.field === "은행명") updateBody.bankName = f.after;
+          if (f.field === "계좌번호") updateBody.accountNo = f.after;
+          if (f.field === "예금주명") updateBody.accountHolder = f.after;
+        });
+
+        const updateRes = await fetch(`/api/contracts/${row.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updateBody)
+        });
+
+        if (histRes.ok && updateRes.ok) {
+          alert("변경사항이 저장되었습니다.");
+          setChangeHistoryRows((prev) => [{ at, before: beforeText, after: afterText, reason: changeMemo || "-", requester: authUser?.email || "관리자", changedFields: changed }, ...prev]);
+          
+          // Update parent state immediately for UI sync
+          if (onUpdate && row) {
+            const updatedRow = { ...row };
+            changed.forEach(f => {
+              if (f.field === "계약자명") updatedRow.name = f.after;
+              if (f.field === "추천인명") updatedRow.ref = f.after;
+              if (f.field === "계약일자") updatedRow.contractDate = f.after;
+              if (f.field === "수당지급일") updatedRow.payoutDate = f.after;
+              if (f.field === "계약종료일") updatedRow.endDate = f.after;
+              if (f.field === "보증금액") updatedRow.depositAmount = f.after;
+              if (f.field === "수당") updatedRow.allowanceAmount = f.after;
+              if (f.field === "연락처") updatedRow.phone = f.after;
+              if (f.field === "주민번호") updatedRow.residentRegistrationNumber = f.after;
+              if (f.field === "은행명") updatedRow.bankName = f.after;
+              if (f.field === "계좌번호") updatedRow.accountNo = f.after;
+              if (f.field === "예금주명") updatedRow.accountHolder = f.after;
+            });
+            onUpdate(updatedRow);
+          }
         }
       } catch (err) {
-        console.error("Failed to save history", err);
+        console.error("Failed to save changes", err);
+        alert("저장 중 오류가 발생했습니다.");
       }
     }
     
@@ -1856,7 +2011,11 @@ function ContractDetail({ row, onBack }: { row: ContractRowData | null; onBack: 
   };
 
   const tabs: { key: DetailTab; label: string }[] = [{ key: "basic", label: "기본정보" }, { key: "document", label: "계약서" }, { key: "allowance", label: "수당정보" }, { key: "account", label: "계좌정보" }, { key: "history", label: "변경이력" }, { key: "memo", label: "메모" }];
-  const tabContent = tab === "basic" ? <DetailBasicTab row={row} /> : tab === "document" ? <DetailDocumentTab row={row} /> : tab === "allowance" ? <DetailAllowanceTab /> : tab === "account" ? <DetailAccountTab row={row} /> : tab === "history" ? <DetailHistoryTab rows={changeHistoryRows} onOpenDetail={(r) => { setSelectedHistory(r); setHistoryDetailOpen(true); }} /> : <DetailMemoTab />;
+  const tabContent = tab === "basic" ? <DetailBasicTab row={row} /> : tab === "document" ? <DetailDocumentTab row={row} /> : tab === "allowance" ? <DetailAllowanceTab /> : tab === "account" ? <DetailAccountTab row={row} /> : tab === "history" ? <DetailHistoryTab rows={changeHistoryRows} onOpenDetail={(r) => { setSelectedHistory(r); setHistoryDetailOpen(true); }} /> : <DetailMemoTab row={row} onRefresh={() => {
+    // Re-fetch logic if needed, but row is passed from parent.
+    // For now, we assume parent state handles it or we could add a refetch here.
+    onBack(); // Go back to list to refresh or we can add a specific fetchRow here.
+  }} />;
   return <div><div className="head-with-btn"><PageHeader title="계약 상세" desc="계약 정보를 확인하고 관리하세요." /><div className="actions"><button className="line-btn" onClick={() => setChangeOpen(true)}>변경관리</button><button className="line-btn" onClick={onBack}>목록으로</button></div></div><section className="card summary-row"><div><div className="meta-label">계약번호</div><div className="meta-value">{row?.no ?? "-"}</div></div><div><div className="meta-label">계약자</div><div className="meta-value">{row?.name ?? "-"}</div></div><div><div className="meta-label">계약상태</div><div className="meta-value"><span className="badge green">{row?.status ?? "정상운영"}</span></div></div><div><div className="meta-label">계약일자</div><div className="meta-value">{row?.contractDate ?? "-"}</div></div><div><div className="meta-label">계약종료일</div><div className="meta-value">{row?.endDate ?? "-"}</div></div></section><div className="tabs">{tabs.map((t) => <button key={t.key} className={tab === t.key ? "tab active" : "tab"} onClick={() => setTab(t.key)}>{t.label}</button>)}</div>{tabContent}
   {changeOpen && (
     <div className="modal-backdrop" onClick={() => setChangeOpen(false)}>
@@ -1950,18 +2109,21 @@ export function App() {
   const [authUser, setAuthUser] = useState<UserAccount | null>(null);
   const [menu, setMenu] = useState<MenuKey>("dashboard");
   const [contractView, setContractView] = useState<ContractView>("list");
-  const [selectedContractRow, setSelectedContractRow] = useState<ContractRowData | null>(null);
+  const [selectedContract, setSelectedContract] = useState<ContractRowData | null>(null);
 
-  const [rows, setRows] = useState<ContractRowData[]>([]);
-  useEffect(() => {
-    fetch('/api/contracts')
-      .then(res => res.json())
-      .then(resData => {
-        setRows(Array.isArray(resData.rows) ? resData.rows : []);
+  const [contracts, setContracts] = useState<ContractRowData[]>([]);
+  const loadContracts = () => {
+    fetch("/api/contracts")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.rows) setContracts(data.rows);
       })
       .catch(() => {});
-  }, []);
+  };
 
+  useEffect(() => {
+    loadContracts();
+  }, []);
 
   const addUserWithTempPassword = (email: string, role: "시스템관리자" | "운영자") => {
     const nextId = users.length ? Math.max(...users.map((u) => u.id)) + 1 : 1;
@@ -1995,21 +2157,26 @@ export function App() {
     setLoginError("");
   };
 
-  const goDetail = (row: ContractRowData) => { setSelectedContractRow(row); setContractView("detail"); setMenu("contracts"); };
-
   const content = useMemo(() => {
-    if (menu === "dashboard") return <DashboardPage onDetail={goDetail} rows={rows} />;
-    if (menu === "contracts") {
-      if (contractView === "create") return <ContractCreate onBack={() => setContractView("list")} />;
-      if (contractView === "detail") return <ContractDetail row={selectedContractRow} onBack={() => setContractView("list")} />;
-      return <ContractList onCreate={() => setContractView("create")} onDetail={goDetail} rows={rows} />;
-    }
-    if (menu === "referrers") return <ReferrerPage />;
-    if (menu === "allowances") return <AllowancePage rows={rows} />;
-    if (menu === "account") return <AccountPage rows={rows} />;
-    return <SystemPage users={users} setUsers={setUsers} onAddUserWithTempPassword={addUserWithTempPassword} onResetPassword={resetPassword} />;
+    return (
+      <div className="container">
+        {(() => {
+          if (menu === "contracts") {
+            if (contractView === "list") return <ContractList rows={contracts} onCreate={() => setContractView("create")} onDetail={(r) => { setSelectedContract(r); setContractView("detail"); }} />;
+            if (contractView === "create") return <ContractCreate onBack={() => { loadContracts(); setContractView("list"); }} />;
+            if (contractView === "detail") return <ContractDetail row={selectedContract} onBack={() => { loadContracts(); setContractView("list"); }} authUser={authUser} onUpdate={(updated) => setSelectedContract(updated)} />;
+          }
+          if (menu === "referrers") return <ReferrerPage />;
+          if (menu === "allowances") return <AllowancePage rows={contracts} />;
+          if (menu === "account") return <AccountPage rows={contracts} />;
+          if (menu === "changes") return <ChangePage rows={contracts} authUser={authUser} onRefresh={loadContracts} />;
+          if (menu === "system") return <SystemPage users={users} setUsers={setUsers} onAddUserWithTempPassword={addUserWithTempPassword} onResetPassword={resetPassword} authUser={authUser} />;
+          return <DashboardPage rows={contracts} onDetail={(r) => { setSelectedContract(r); setContractView("detail"); setMenu("contracts"); }} />;
+        })()}
+      </div>
+    );
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [menu, contractView, users, rows, selectedContractRow]);
+  }, [menu, contractView, users, contracts, selectedContract]);
 
   if (!authUser) {
     return (
@@ -2020,7 +2187,11 @@ export function App() {
           <label className="field"><span>비밀번호</span><input className="input-input" type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} placeholder="비밀번호" onKeyDown={(e) => { if (e.key === "Enter") doLogin(); }} /></label>
           {loginError ? <div className="login-error">{loginError}</div> : null}
           <div className="modal-actions" style={{ marginTop: "10px" }}>
-            <button className="line-btn" onClick={() => { setLoginEmail(""); setLoginPassword(""); setLoginError(""); }}>취소</button>
+            <button className="line-btn" type="button" onClick={() => {
+              setLoginEmail("");
+              setLoginPassword("");
+              setLoginError("");
+            }}>초기화</button>
             <button className="primary-btn" onClick={doLogin}>로그인</button>
           </div>
         </section>

@@ -31,12 +31,12 @@ function toWonText(value) {
 
 function toIsoDate(value) {
   if (!value) return "";
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
-  const text = String(value);
-  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
-  const d = new Date(text);
+  const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function addYears(dateText, years) {
@@ -78,7 +78,8 @@ function normalizeRows(rows) {
     residentRegistrationNumber: row.resident_registration_number ?? "",
     remarks: row.remarks ?? "",
     phone: row.phone ?? "",
-    createdAt: row.created_at ? String(row.created_at).slice(0, 10) : ""
+    createdAt: row.created_at ? String(row.created_at).slice(0, 10) : "",
+    updatedAt: row.updated_at ? String(row.updated_at).slice(0, 10) : ""
   }));
 }
 
@@ -141,6 +142,17 @@ async function ensureAppSchema() {
       created_at timestamptz not null default now()
     );
   `);
+  await pool.query(`
+    create table if not exists contract_memos (
+      id bigserial primary key,
+      contract_id text not null,
+      slot_index int not null default 0,
+      content text not null,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      unique(contract_id, slot_index)
+    );
+  `);
 }
 
 app.get("/health", async (_req, res) => {
@@ -151,6 +163,28 @@ app.get("/health", async (_req, res) => {
   } catch (error) {
     res.status(500).json({ ok: false, db: false, message: String(error) });
   }
+});
+
+app.get("/contracts/:id/memos", async (req, res) => {
+  const { id } = req.params;
+  try {
+    await ensureAppSchema();
+    const result = await pool.query("select slot_index as \"slotIndex\", content, updated_at as \"updatedAt\" from contract_memos where contract_id = $1 order by slot_index asc", [id]);
+    res.json({ rows: result.rows });
+  } catch (error) { res.status(500).json({ message: String(error) }); }
+});
+
+app.post("/contracts/:id/memos", async (req, res) => {
+  const { id } = req.params;
+  const { slotIndex, content } = req.body ?? {};
+  try {
+    await ensureAppSchema();
+    await pool.query(
+      "insert into contract_memos (contract_id, slot_index, content) values ($1, $2, $3) on conflict (contract_id, slot_index) do update set content = excluded.content, updated_at = now()",
+      [id, slotIndex, content]
+    );
+    res.json({ ok: true });
+  } catch (error) { res.status(500).json({ message: String(error) }); }
 });
 
 app.get("/contracts", async (_req, res) => {
@@ -210,8 +244,9 @@ app.put("/contracts/:contractNo", async (req, res) => {
         account_holder = coalesce($13, account_holder),
         resident_registration_number = coalesce($14, resident_registration_number),
         remarks = coalesce($15, remarks),
+        phone = coalesce($16, phone),
         updated_at = now()
-      where contract_no = $1
+      where contract_no = $1 or id::text = $1 or id::text = split_part($1, '-', 3)
       returning contract_no
       `,
       [
@@ -229,7 +264,8 @@ app.put("/contracts/:contractNo", async (req, res) => {
         body.paymentMethod ?? null,
         body.accountHolder ?? null,
         body.residentRegistrationNumber ?? null,
-        body.remarks ?? null
+        body.remarks ?? null,
+        body.phone ?? null
       ]
     );
     if (result.rowCount === 0) {

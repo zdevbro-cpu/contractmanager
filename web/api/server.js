@@ -42,12 +42,12 @@ function toWonText(value) {
 
 function toIsoDate(value) {
   if (!value) return "";
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
-  const text = String(value);
-  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
-  const d = new Date(text);
+  const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function addYears(dateText, years) {
@@ -60,6 +60,7 @@ function addYears(dateText, years) {
 
 function normalizeRows(rows) {
   return rows.map((row) => ({
+    id: row.id,
     no: row.contract_no ?? `LASM-${(toIsoDate(row.contract_date) || toIsoDate(row.first_allowance_date) || "2026-01-01").replaceAll("-", "")}-${String(row.id).padStart(3, "0")}`,
     name: row.contractor_name ?? "",
     ref: row.referrer_name ?? "",
@@ -86,7 +87,8 @@ function normalizeRows(rows) {
     allowanceAmount: toWonText(row.work_allowance),
     allowanceAmountRaw: row.work_allowance ?? null,
     phone: row.phone ?? "",
-    createdAt: row.created_at ? String(row.created_at).slice(0, 10) : ""
+    createdAt: row.created_at ? String(row.created_at).slice(0, 10) : "",
+    updatedAt: row.updated_at ? String(row.updated_at).slice(0, 10) : ""
   }));
 }
 
@@ -139,6 +141,16 @@ async function ensureAppSchema() {
       updated_at timestamptz not null default now()
     );
   `);
+  await pool.query(`
+    create table if not exists contract_memos (
+      id bigserial primary key,
+      contract_id bigint not null,
+      slot_index int not null,
+      content text,
+      updated_at timestamptz not null default now(),
+      unique(contract_id, slot_index)
+    );
+  `);
 }
 
 app.get("/api/health", async (_req, res) => {
@@ -147,6 +159,63 @@ app.get("/api/health", async (_req, res) => {
     res.json({ ok: true, db: true });
   } catch (error) {
     res.status(500).json({ ok: false, db: false, message: String(error) });
+  }
+});
+
+app.get("/api/contracts/:id/history", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      "select payload from app_change_history where (payload->>'contract_id') = $1 or (payload->>'id') = $1 order by updated_at desc",
+      [id]
+    );
+    res.json({ rows: result.rows.map((x) => x.payload) });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
+  }
+});
+
+app.post("/api/contracts/:id/history", async (req, res) => {
+  const { id } = req.params;
+  const payload = req.body ?? {};
+  try {
+    await pool.query(
+      "insert into app_change_history (id, payload, updated_at) values ($1, $2::jsonb, now())",
+      [`${id}-${Date.now()}`, JSON.stringify({ ...payload, contract_id: id })]
+    );
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
+  }
+});
+
+app.get("/api/contracts/:id/memos", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      "select slot_index as \"slotIndex\", content, updated_at as \"updatedAt\" from contract_memos where contract_id = $1 order by slot_index",
+      [id]
+    );
+    res.json({ rows: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
+  }
+});
+
+app.post("/api/contracts/:id/memos", async (req, res) => {
+  const { id } = req.params;
+  const { slotIndex, content } = req.body ?? {};
+  try {
+    await pool.query(
+      `insert into contract_memos (contract_id, slot_index, content, updated_at)
+       values ($1, $2, $3, now())
+       on conflict (contract_id, slot_index) do update
+       set content = excluded.content, updated_at = now()`,
+      [id, slotIndex, content]
+    );
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
   }
 });
 
@@ -205,8 +274,9 @@ app.put("/api/contracts/:contractNo", async (req, res) => {
         account_holder = coalesce($13, account_holder),
         resident_registration_number = coalesce($14, resident_registration_number),
         remarks = coalesce($15, remarks),
+        phone = coalesce($16, phone),
         updated_at = now()
-      where contract_no = $1
+      where contract_no = $1 or id::text = $1 or id::text = split_part($1, '-', 3)
       returning contract_no
       `,
       [
@@ -224,7 +294,8 @@ app.put("/api/contracts/:contractNo", async (req, res) => {
         body.paymentMethod ?? null,
         body.accountHolder ?? null,
         body.residentRegistrationNumber ?? null,
-        body.remarks ?? null
+        body.remarks ?? null,
+        body.phone ?? null
       ]
     );
     if (result.rowCount === 0) {
