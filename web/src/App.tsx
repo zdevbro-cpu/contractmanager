@@ -1,4 +1,4 @@
-﻿import {
+import {
   Bell,
   CheckCircle2,
   ChevronDown,
@@ -618,7 +618,6 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
   const [contractorFilter, setContractorFilter] = useState("전체");
-  const [verifyFilter, setVerifyFilter] = useState("전체");
   const [perPage, setPerPage] = useState(20);
   const [page, setPage] = useState(1);
 
@@ -629,7 +628,7 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
       : rawAccountNo;
     return {
       ...r,
-      baseDate: r.contractDate || r.payoutDate || "",
+      baseDate: r.payoutDate || "",
       amount: Number(r.allowanceAmountRaw ?? 0),
       bankName: r.bankName || "",
       accountNo: rawAccountNo,
@@ -641,8 +640,7 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
   const filteredRows = allowanceRows.filter((row) => {
     const inDate = !startDate || !endDate || !row.baseDate || (row.baseDate >= startDate && row.baseDate <= endDate);
     const inContractor = contractorFilter === "전체" || row.name === contractorFilter;
-    const inVerify = verifyFilter === "전체" || row.verifyStatus === verifyFilter;
-    return inDate && inContractor && inVerify;
+    return inDate && inContractor;
   });
   const totalAmount = filteredRows.reduce((sum, row) => sum + row.amount, 0);
   const confirmedAmount = filteredRows.filter((row) => row.status.includes("지급확정") || row.status.includes("정상운영")).reduce((sum, row) => sum + row.amount, 0);
@@ -754,17 +752,8 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
               ))}
             </select>
           </label>
-          <label className="field">
-            <span>계좌검증</span>
-            <select className="input-input" value={verifyFilter} onChange={(e) => setVerifyFilter(e.target.value)}>
-              <option value="전체">전체</option>
-              <option value="검증완료">검증완료</option>
-              <option value="검증중">검증중</option>
-              <option value="검증오류">검증오류</option>
-            </select>
-          </label>
           <div className="allowance-filter-actions">
-            <button className="line-btn allowance-reset-btn" onClick={() => { setStartDate(today); setEndDate(today); setContractorFilter("전체"); setVerifyFilter("전체"); setPage(1); }}>초기화</button>
+            <button className="line-btn allowance-reset-btn" onClick={() => { setStartDate(today); setEndDate(today); setContractorFilter("전체"); setPage(1); }}>초기화</button>
             <button className="primary-btn allowance-export-btn" onClick={exportFilteredList}>출력</button>
           </div>
         </div>
@@ -774,12 +763,12 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
         <div className="card-title-sm">전체 {filteredRows.length.toLocaleString("ko-KR")}건</div>
         <table className="grid allowance-grid">
           <thead>
-            <tr><th>기준일</th><th>계약자명</th><th>추천인</th><th>은행명</th><th>계좌번호</th><th>수당</th><th>지급금액</th><th>계좌검증</th></tr>
+            <tr><th>수당지급기준</th><th>계약자명</th><th>추천인</th><th>은행명</th><th>계좌번호</th><th>계약일자</th><th>계약종료일</th><th>보증금액</th><th>수당</th><th>지급금액</th></tr>
           </thead>
           <tbody>
             {pagedRows.map((r) => (
               <tr key={r.no}>
-                <td>{r.baseDate}</td><td>{r.name}</td><td>{r.ref}</td><td>{r.bankName}</td><td>{r.accountMasked}</td><td>{amountText(r.amount)}</td><td>{amountText(paidAmount(r.amount))}</td><td><span className={r.verifyStatus.includes("오류") ? "err" : r.verifyStatus.includes("중") ? "" : "ok"}>{r.verifyStatus}</span></td>
+                <td>{r.baseDate || "-"}</td><td>{r.name || "-"}</td><td>{r.ref || "-"}</td><td>{r.bankName}</td><td>{r.accountMasked}</td><td>{r.contractDate || "-"}</td><td>{r.endDate || "-"}</td><td>{r.depositAmount || "-"}</td><td className="text-right">{amountText(r.amount)}</td><td className="text-right">{amountText(paidAmount(r.amount))}</td>
               </tr>
             ))}
           </tbody>
@@ -802,23 +791,22 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
         </div>
       </section>
 
-      <section className="card total-strip allowance-total-strip">
-        <div>
-          <div className="total-head"><Wallet size={18} /> <b>합계금액</b></div>
-          <span>{amountText(totalAmount)}</span>
-        </div>
-        <div>
-          <div className="total-head"><CircleDollarSign size={18} /> <b>지급확정 금액</b></div>
-          <span>{amountText(confirmedAmount)}</span>
-        </div>
-        <div>
-          <div className="total-head"><CheckCircle2 size={18} /> <b>지급완료 금액</b></div>
-          <span>{amountText(completedAmount)}</span>
-        </div>
-        <div>
-          <div className="total-head"><Landmark size={18} /> <b>지급보류 금액</b></div>
-          <span>{amountText(holdAmount)}</span>
-        </div>
+      <section className="allowance-kpis bottom-kpis four">
+        {[
+          { label: "합계금액", value: amountText(totalAmount), sub: "전체 지급 대상의 수당 총액", icon: <Wallet size={24} />, tone: "blue" },
+          { label: "지급확정 금액", value: amountText(confirmedAmount), sub: "지급이 확정된 수당", icon: <CircleDollarSign size={24} />, tone: "green" },
+          { label: "지급완료 금액", value: amountText(completedAmount), sub: "지급이 완료된 수당", icon: <CheckCircle2 size={24} />, tone: "violet" },
+          { label: "지급보류 금액", value: amountText(holdAmount), sub: "대기/변경 등 지급 보류", icon: <Landmark size={24} />, tone: "orange" }
+        ].map((item) => (
+          <article key={item.label} className="referrer-kpi">
+            <div className={`referrer-kpi-icon ${item.tone}`}>{item.icon}</div>
+            <div className="referrer-kpi-body">
+              <div className="referrer-kpi-label">{item.label}</div>
+              <div className="referrer-kpi-value">{item.value}</div>
+              <div className="referrer-kpi-sub">{item.sub}</div>
+            </div>
+          </article>
+        ))}
       </section>
     </div>
   );

@@ -13,6 +13,7 @@
 - **Follow the `agent.md` rules**: Once this file is created, always follow the rules written in `agent.md`.
 - **Explain progress in Korean**: Always explain the progress and work process in Korean.
 - **Do not use browser testing**: Do not use browser-based testing.
+- **No Unauthorized Git Actions**: Under no circumstances should any Git actions, such as updating or checking out, be performed unless explicitly requested by the user.
 
 # Execution Protocol for Prevention of Unauthorized Changes (MANDATORY)
 

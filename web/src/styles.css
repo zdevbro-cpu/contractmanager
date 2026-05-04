@@ -1,4 +1,4 @@
-﻿:root { font-family: "Noto Sans KR", "Segoe UI", sans-serif; color: #1a2438; background: #f4f6fb; }
+:root { font-family: "Noto Sans KR", "Segoe UI", sans-serif; color: #1a2438; background: #f4f6fb; }
 * { box-sizing: border-box; }
 body { margin: 0; }
 button { font-family: inherit; }
@@ -146,6 +146,7 @@ button { font-family: inherit; }
 .contract-grid th { text-align: center; }
 .contract-grid th.center-th { text-align: center !important; }
 .contract-grid td { text-align: center; }
+.text-right { text-align: right !important; }
 .sort-btn {
   border: 0;
   background: transparent;
@@ -315,7 +316,8 @@ button { font-family: inherit; }
   margin-top: 54px;
 }
 .allowance-kpis { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 12px; }
-.allowance-period-filter { display: grid; grid-template-columns: 160px 160px 1fr 1fr 260px; gap: 10px; align-items: end; width: 100%; }
+.allowance-kpis.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.allowance-period-filter { display: grid; grid-template-columns: 1fr 1fr 1fr 260px; gap: 10px; align-items: end; width: 100%; }
 .allowance-filter-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -494,6 +496,7 @@ button { font-family: inherit; }
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .referrer-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .allowance-kpis { grid-template-columns: 1fr; }
+  .allowance-kpis.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .two-col { grid-template-columns: 1fr; }
   .filters, .filters.four, .filters.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .form-grid, .summary-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
