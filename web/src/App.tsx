@@ -939,7 +939,7 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
   const exportFilteredList = async () => {
     const padRight = (value: string, width: number) => value.padEnd(width, " ");
     const padLeft = (value: string, width: number) => value.padStart(width, " ");
-    const amountOnly = (value: number) => `${value.toLocaleString("ko-KR")} 원`;
+    const amountOnly = (value: number) => `${value.toLocaleString("ko-KR")}원`;
 
     const nameWidth = 8;
     const bankWidth = 8;
