@@ -745,12 +745,19 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
           </label>
           <label className="field">
             <span>계약자명</span>
-            <select className="input-input" value={contractorFilter} onChange={(e) => setContractorFilter(e.target.value)}>
-              <option value="전체">전체</option>
-              {[...new Set(allowanceRows.map((r) => r.name))].map((name) => (
-                <option key={name} value={name}>{name}</option>
+            <input 
+              className="input-input" 
+              list="contractor-names" 
+              placeholder="전체 또는 이름 입력" 
+              value={contractorFilter} 
+              onChange={(e) => setContractorFilter(e.target.value)} 
+            />
+            <datalist id="contractor-names">
+              <option value="전체" />
+              {[...new Set(allowanceRows.map((r) => r.name))].sort((a, b) => a.localeCompare(b, "ko")).map((name) => (
+                <option key={name} value={name} />
               ))}
-            </select>
+            </datalist>
           </label>
           <div className="allowance-filter-actions">
             <button className="line-btn allowance-reset-btn" onClick={() => { setStartDate(today); setEndDate(today); setContractorFilter("전체"); setPage(1); }}>초기화</button>
