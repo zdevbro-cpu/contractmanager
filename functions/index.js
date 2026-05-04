@@ -49,6 +49,7 @@ function addYears(dateText, years) {
 
 function normalizeRows(rows) {
   return rows.map((row) => ({
+    id: row.id,
     no: row.contract_no ?? `LASM-${(toIsoDate(row.contract_date) || toIsoDate(row.first_allowance_date) || "2026-01-01").replaceAll("-", "")}-${String(row.id).padStart(3, "0")}`,
     name: row.contractor_name ?? "",
     ref: row.referrer_name ?? "",
@@ -126,6 +127,18 @@ async function ensureAppSchema() {
       id text primary key,
       payload jsonb not null,
       updated_at timestamptz not null default now()
+    );
+  `);
+  await pool.query(`
+    create table if not exists contract_changes (
+      id bigserial primary key,
+      contract_id bigint not null,
+      at timestamptz not null default now(),
+      before_text text,
+      after_text text,
+      reason text,
+      changed_fields jsonb,
+      created_at timestamptz not null default now()
     );
   `);
 }
@@ -229,31 +242,73 @@ app.put("/contracts/:contractNo", async (req, res) => {
   }
 });
 
-app.get("/contracts/:contractNo/pdf", async (req, res) => {
-  const { contractNo } = req.params;
+app.get("/contracts/:id/history", async (req, res) => {
+  const { id } = req.params;
   try {
-    const result = await pool.query("select contractor_name, contract_name, contract_date from contracts where contract_no = $1", [contractNo]);
-    if (result.rowCount === 0) return res.status(404).send("Contract not found");
+    const result = await pool.query(
+      "select at, before_text as before, after_text as after, reason, changed_fields as \"changedFields\" from contract_changes where contract_id = $1 order by at desc",
+      [id]
+    );
+    res.json({ rows: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
+  }
+});
+
+app.post("/contracts/:id/history", async (req, res) => {
+  const { id } = req.params;
+  const { before, after, reason, changedFields } = req.body ?? {};
+  try {
+    await pool.query(
+      "insert into contract_changes (contract_id, before_text, after_text, reason, changed_fields) values ($1, $2, $3, $4, $5)",
+      [id, before, after, reason, JSON.stringify(changedFields || [])]
+    );
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
+  }
+});
+
+app.get("/contracts/:id/pdf", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query("select contractor_name, first_allowance_date from contracts where id = $1", [id]);
+    if (result.rowCount === 0) return res.status(404).send("Contract not found in database");
     
-    const { contractor_name, contract_name, contract_date } = result.rows[0];
-    const dateStr = contract_date ? new Date(contract_date).toISOString().slice(0, 10).replace(/-/g, "") : "";
+    const { contractor_name, first_allowance_date } = result.rows[0];
+    if (!contractor_name) return res.status(400).send("Contractor name is missing");
+
     const fs = require("fs");
     const path = require("path");
     
-    // Search in data subdirectories
-    const dataRoot = path.join(__dirname, "..", "data");
-    const months = ["2026년 1월", "2026년 2월", "2026년 3월", "2026년 4월", "2026년 5월"];
+    // Path must be relative to this file in the functions directory
+    const dataRoot = path.join(__dirname, "data");
+    const cleanName = contractor_name.trim();
+    
     let filePath = null;
-    
-    for (const m of months) {
-      const p = path.join(dataRoot, m, `${contract_name}_${dateStr}_${contractor_name}.pdf`);
-      if (fs.existsSync(p)) {
-        filePath = p;
-        break;
+
+    // Recursive search in all subdirectories of data
+    function findFileRecursive(dir) {
+      if (!fs.existsSync(dir)) return null;
+      const items = fs.readdirSync(dir);
+      for (const item of items) {
+        const fullPath = path.join(dir, item);
+        const stat = fs.statSync(fullPath);
+        if (stat.isDirectory()) {
+          const found = findFileRecursive(fullPath);
+          if (found) return found;
+        } else if (item.toLowerCase().endsWith(".pdf") && item.includes(cleanName)) {
+          return fullPath;
+        }
       }
+      return null;
     }
+
+    filePath = findFileRecursive(dataRoot);
     
-    if (!filePath) return res.status(404).send("PDF file not found on server");
+    if (!filePath) {
+      return res.status(404).send(`PDF file not found for contractor [${cleanName}] in server storage.`);
+    }
     
     res.setHeader("Content-Type", "application/pdf");
     res.sendFile(filePath);

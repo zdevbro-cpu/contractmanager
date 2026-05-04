@@ -22,6 +22,7 @@ import {
 import { useEffect, useMemo, useState, type ChangeEvent, type Dispatch, type SetStateAction } from "react";
 
 type ContractRowData = {
+  id: number;
   no: string;
   name: string;
   ref: string;
@@ -483,8 +484,8 @@ function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
         )}
         <div className="actions detail-file-actions">
           <button className="primary-btn" onClick={() => {
-            if (!row?.no) return;
-            const url = `${API_BASE}/contracts/${row.no}/pdf`;
+            if (!row?.id) return;
+            const url = `${API_BASE}/contracts/${row.id}/pdf`;
             window.open(url, "_blank");
           }}>계약서 보기</button>
           <button className="line-btn">파일 업로드/변경</button>
@@ -516,7 +517,37 @@ function DetailHistoryTab({
   rows: Array<{ at: string; before: string; after: string; reason: string; changedFields: Array<{ field: string; before: string; after: string }> }>;
   onOpenDetail: (row: { at: string; before: string; after: string; reason: string; changedFields: Array<{ field: string; before: string; after: string }> }) => void;
 }) {
-  return <section className="card"><div className="card-title-sm">변경이력</div><table className="grid"><thead><tr><th>요청일시</th><th>변경유형</th><th>변경 전</th><th>변경 후</th><th>요청자</th><th>승인자</th><th>처리상태</th></tr></thead><tbody>{rows.length === 0 ? <tr><td colSpan={7}>변경 이력이 없습니다.</td></tr> : rows.map((row, i) => <tr key={`${row.at}-${i}`} style={{ cursor: "pointer" }} onClick={() => onOpenDetail(row)}><td>{row.at}</td><td>계약정보변경</td><td>{row.before}</td><td>{row.after}</td><td>김영수</td><td>시스템관리자</td><td><span className="badge blue">승인대기</span></td></tr>)}</tbody></table></section>;
+  return (
+    <section className="card">
+      <div className="card-title-sm">변경이력</div>
+      <table className="grid">
+        <thead>
+          <tr>
+            <th>변경일시</th>
+            <th>변경유형</th>
+            <th>변경 전</th>
+            <th>변경 후</th>
+            <th>요청자</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr><td colSpan={5}>변경 이력이 없습니다.</td></tr>
+          ) : (
+            rows.map((row, i) => (
+              <tr key={`${row.at}-${i}`} style={{ cursor: "pointer" }} onClick={() => onOpenDetail(row)}>
+                <td>{row.at}</td>
+                <td>계약정보변경</td>
+                <td>{row.before}</td>
+                <td>{row.after}</td>
+                <td>관리자</td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </section>
+  );
 }
 function DetailMemoTab() { return <section className="card"><div><div className="card-title-sm">메모 작성</div><div className="input memo-box">메모를 입력하세요...</div><div className="actions detail-file-actions"><button className="line-btn">파일 첨부</button><button className="primary-btn">등록</button></div></div></section>; }
 
@@ -1747,6 +1778,17 @@ function ContractDetail({ row, onBack }: { row: ContractRowData | null; onBack: 
   const [changeOpen, setChangeOpen] = useState(false);
   const [changeMemo, setChangeMemo] = useState("");
   const [changeHistoryRows, setChangeHistoryRows] = useState<Array<{ at: string; before: string; after: string; reason: string; changedFields: Array<{ field: string; before: string; after: string }> }>>([]);
+  
+  useEffect(() => {
+    if (!row?.id) return;
+    fetch(`/api/contracts/${row.id}/history`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.rows) setChangeHistoryRows(data.rows);
+      })
+      .catch(() => {});
+  }, [row?.id]);
+
   const [historyDetailOpen, setHistoryDetailOpen] = useState(false);
   const [selectedHistory, setSelectedHistory] = useState<null | { at: string; before: string; after: string; reason: string; changedFields: Array<{ field: string; before: string; after: string }> }>(null);
   const [changeFields, setChangeFields] = useState(() => [
@@ -1767,13 +1809,33 @@ function ContractDetail({ row, onBack }: { row: ContractRowData | null; onBack: 
     { field: "예금주명", before: row?.accountHolder || "-", after: row?.accountHolder || "-" }
   ]);
 
-  const saveChangeRequest = () => {
+  const saveChangeRequest = async () => {
     const changed = changeFields.filter((x) => x.before !== x.after);
     const beforeText = changed.length === 0 ? "변경 없음" : changed.map((x) => `${x.field}:${x.before}`).join(" / ");
     const afterText = changed.length === 0 ? "변경 없음" : changed.map((x) => `${x.field}:${x.after}`).join(" / ");
     const now = new Date();
     const at = `${formatDate(now)} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-    setChangeHistoryRows((prev) => [{ at, before: beforeText, after: afterText, reason: changeMemo || "-", changedFields: changed }, ...prev]);
+    
+    if (row?.id) {
+      try {
+        const res = await fetch(`/api/contracts/${row.id}/history`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            before: beforeText,
+            after: afterText,
+            reason: changeMemo || "-",
+            changedFields: changed
+          })
+        });
+        if (res.ok) {
+          setChangeHistoryRows((prev) => [{ at, before: beforeText, after: afterText, reason: changeMemo || "-", changedFields: changed }, ...prev]);
+        }
+      } catch (err) {
+        console.error("Failed to save history", err);
+      }
+    }
+    
     setChangeOpen(false);
     setTab("history");
   };
@@ -1814,7 +1876,7 @@ function ContractDetail({ row, onBack }: { row: ContractRowData | null; onBack: 
         </table>
         <div className="actions modal-actions">
           <button className="line-btn" onClick={() => setChangeOpen(false)}>취소</button>
-          <button className="primary-btn" onClick={saveChangeRequest}>승인요청 및 저장</button>
+          <button className="primary-btn" onClick={() => void saveChangeRequest()}>저장</button>
         </div>
       </section>
     </div>
