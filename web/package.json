@@ -8,13 +8,17 @@
     "dev:api": "node api/server.js",
     "dev:all": "concurrently \"npm run dev:api\" \"npm run dev\"",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "import:data:dry": "node scripts/import-contracts-from-data.mjs",
+    "import:data:apply": "node scripts/import-contracts-from-data.mjs --apply"
   },
   "dependencies": {
     "express": "^4.21.2",
     "lucide-react": "^0.511.0",
+    "pg": "^8.20.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",

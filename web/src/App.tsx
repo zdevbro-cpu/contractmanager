@@ -9,6 +9,7 @@
   Landmark,
   Link2,
   Menu,
+  Pencil,
   Plus,
   Search,
   Settings,
@@ -17,12 +18,51 @@
   Users,
   Wallet
 } from "lucide-react";
-import { useMemo, useState, type ChangeEvent, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent, type Dispatch, type SetStateAction } from "react";
+
+type ContractRowData = {
+  no: string;
+  name: string;
+  ref: string;
+  bankName?: string;
+  accountNo?: string;
+  type: string;
+  contractDate: string;
+  payoutDate: string;
+  endDate: string;
+  depositAmount: string;
+  depositAmountRaw?: number | null;
+  allowanceAmount: string;
+  allowanceAmountRaw?: number | null;
+  phone?: string;
+  status: string;
+  verify: string;
+};
 
 type MenuKey = "dashboard" | "contracts" | "referrers" | "allowances" | "account" | "system";
 type ContractView = "list" | "create" | "detail";
 type DetailTab = "basic" | "document" | "allowance" | "account" | "history" | "memo";
 type UserAccount = { id: number; email: string; role: "시스템관리자" | "운영자"; state: "활성" | "비활성"; password: string };
+type ContractTypeRule = { id: number; deposit: number; workAmount4: number; workAmount2: number; nonWorkAmount: number };
+type ContractTypeRow = { id: number; name: string; contractYears: number; payoutMonths: number; rules: ContractTypeRule[] };
+
+const BANKS = ["KB국민은행","신한은행","우리은행","하나은행","NH농협은행","IBK기업은행","카카오뱅크","토스뱅크","SC제일은행","경남은행","광주은행","대구은행","부산은행","전북은행","제주은행","케이뱅크","수협은행","우체국","신협"];
+
+function numFmt(v: string): string {
+  const n = v.replace(/[^\d]/g, "");
+  return n === "" ? "" : Number(n).toLocaleString("ko-KR");
+}
+function rrnFmt(v: string): string {
+  const n = v.replace(/[^\d]/g, "").slice(0, 13);
+  if (n.length <= 6) return n;
+  return n.slice(0, 6) + "-" + n.slice(6);
+}
+function phoneFmt(v: string): string {
+  const n = v.replace(/[^\d]/g, "").slice(0, 11);
+  if (n.length <= 3) return n;
+  if (n.length <= 7) return n.slice(0, 3) + "-" + n.slice(3);
+  return n.slice(0, 3) + "-" + n.slice(3, 7) + "-" + n.slice(7);
+}
 
 const menus: { key: MenuKey; label: string; icon: JSX.Element }[] = [
   { key: "dashboard", label: "대시보드", icon: <Home size={18} /> },
@@ -75,19 +115,6 @@ function makeTempPassword() {
   return `Cm!${Math.random().toString(36).slice(2, 6)}${Math.floor(Math.random() * 900 + 100)}`;
 }
 
-const contractRows = Array.from({ length: 10 }).map((_, i) => ({
-  contractDate: `2024-05-${String(20 - i).padStart(2, "0")}`,
-  no: `LASM-${compactDate(`2024-05-${String(20 - i).padStart(2, "0")}`)}-${String(i + 1).padStart(3, "0")}`,
-  name: ["김영수", "박지민", "이서연", "정우진", "한지훈", "최유리", "강민호", "윤지혜", "임재현", "송아름"][i],
-  ref: ["이철수", "최민우", "김태훈", "박소영", "이은정", "정민수", "서지현", "박준형", "김나영", "이동건"][i],
-  type: "LAS점장점주",
-  status: ["정상운영", "정상운영", "지급대기", "정상운영", "계약변경", "정상운영", "지급확정", "정상운영", "입금표 미등록", "정상운영"][i],
-  verify: ["검증완료", "검증완료", "검증완료", "검증완료", "검증중", "검증완료", "검증완료", "실명조회 오류", "검증완료", "검증완료"][i]
-})).map((row) => ({
-  ...row,
-  payoutDate: addMonths(row.contractDate, 2),
-  endDate: addYears(row.contractDate, 3)
-}));
 
 function statusClass(s: string) {
   if (s.includes("정상") || s.includes("완료")) return "green";
@@ -116,25 +143,32 @@ function StatCards({ items }: { items: { label: string; value: string; icon?: JS
   );
 }
 
-function DashboardPage({ onDetail }: { onDetail: () => void }) {
+function DashboardPage({ onDetail, rows }: { onDetail: (row: ContractRowData) => void; rows: ContractRowData[] }) {
   return (
     <div>
       <PageHeader title="대시보드" desc="계약 운영 현황을 한눈에 확인하세요." />
-      <StatCards items={[{ label: "전체 계약", value: "12,458 건", icon: <FileText size={18} />, tone: "blue" }, { label: "정상운영", value: "10,842 건", icon: <CheckCircle2 size={18} />, tone: "green" }, { label: "지급예정금액", value: "1,245,680,000 원", icon: <Wallet size={18} />, tone: "orange" }, { label: "검토 필요", value: "236 건", icon: <Search size={18} />, tone: "violet" }]} />
-      <section className="card"><div className="card-title-sm">최근 계약 현황</div><ContractSimpleTable onDetail={onDetail} /></section>
+
+      <StatCards items={[
+        { label: "전체 계약", value: (rows || []).length.toLocaleString("ko-KR") + " 건", icon: <FileText size={18} />, tone: "blue" },
+        { label: "정상운영", value: (rows || []).filter(r => (r.status || "").includes("정상") || (r.status || "").includes("완료")).length.toLocaleString("ko-KR") + " 건", icon: <CheckCircle2 size={18} />, tone: "green" },
+        { label: "지급예정금액", value: (rows || []).reduce((acc, r) => acc + (Number(String(r.allowanceAmount||"").replace(/[^0-9]/g, "")) || 0), 0).toLocaleString("ko-KR") + " 원", icon: <Wallet size={18} />, tone: "orange" },
+        { label: "검토 필요", value: (rows || []).filter(r => (r.status || "").includes("대기") || (r.verify || "").includes("오류")).length.toLocaleString("ko-KR") + " 건", icon: <Search size={18} />, tone: "violet" }
+      ]} />
+
+      <section className="card"><div className="card-title-sm">최근 계약 현황</div><ContractSimpleTable onDetail={onDetail} rows={rows || []} /></section>
     </div>
   );
 }
 
-function ContractSimpleTable({ onDetail }: { onDetail?: () => void }) {
+function ContractSimpleTable({ onDetail, rows }: { onDetail?: (row: ContractRowData) => void; rows: ContractRowData[] }) {
   return (
     <table className="grid">
       <thead><tr><th>계약번호</th><th>계약자명</th><th>추천인</th><th>계약일</th><th>상태</th><th>계좌검증</th><th>상세</th></tr></thead>
       <tbody>
-        {contractRows.map((r) => (
+        {rows.slice(0, 10).map((r) => (
           <tr key={r.no}>
-            <td>{r.no}</td><td>{r.name}</td><td>{r.ref}</td><td>{r.contractDate}</td><td><span className={`badge ${statusClass(r.status)}`}>{r.status}</span></td><td><span className={r.verify.includes("오류") ? "err" : "ok"}>{r.verify}</span></td>
-            <td><button className="icon-btn" onClick={onDetail}><Eye size={14} /></button></td>
+            <td>{r.no}</td><td>{r.name}</td><td>{r.ref}</td><td>{r.contractDate}</td><td><span className={`badge ${statusClass(r.status || "")}`}>{r.status}</span></td><td><span className={(r.verify || "").includes("오류") ? "err" : "ok"}>{r.verify || "미검증"}</span></td>
+            <td><button className="icon-btn" onClick={() => onDetail?.(r)}><Eye size={14} /></button></td>
           </tr>
         ))}
       </tbody>
@@ -142,7 +176,7 @@ function ContractSimpleTable({ onDetail }: { onDetail?: () => void }) {
   );
 }
 
-function ContractListTable({ onDetail }: { onDetail: () => void }) {
+function ContractListTable({ onDetail, rows }: { onDetail: (row: ContractRowData) => void; rows: ContractRowData[] }) {
   const compactStatus = (value: string) => {
     if (value === "입금표 미등록") return "입금표미등록";
     return value;
@@ -154,65 +188,155 @@ function ContractListTable({ onDetail }: { onDetail: () => void }) {
   };
 
   return (
-    <>
-      <table className="grid contract-grid">
-        <thead><tr><th>계약번호</th><th className="center-th">계약자명</th><th>근무여부</th><th>계약종류</th><th>추천인</th><th>계약일자</th><th>수당지급일</th><th>계약종료일</th><th>보증금액</th><th>수당</th><th className="center-th">상태</th><th className="center-th">계좌검증</th><th>상세</th></tr></thead>
-        <tbody>
-          {contractRows.map((r) => (
-            <tr key={r.no}>
-              <td>{r.no}</td><td>{r.name}</td><td><input className="work-check" type="checkbox" defaultChecked={r.name !== "박지민"} /></td><td>{r.type}</td><td>{r.ref}</td><td>{r.contractDate}</td><td>{r.payoutDate}</td><td>{r.endDate}</td><td>100,000,000 원</td><td>1,500,000 원</td>
-              <td><span className={`status-fixed ${statusClass(r.status)}`}>{compactStatus(r.status)}</span></td><td><span className={`verify-fixed ${r.verify.includes("오류") ? "err" : "ok"}`}>{compactVerify(r.verify)}</span></td>
-              <td><button className="icon-btn" onClick={onDetail}><Eye size={14} /></button></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="contract-pagination">
-        <div className="pager">
-          <button className="pager-btn active">1</button>
-          <button className="pager-btn">2</button>
-          <button className="pager-btn">3</button>
-          <button className="pager-btn">4</button>
-          <button className="pager-btn">5</button>
-          <span>...</span>
-          <button className="pager-btn">125</button>
-        </div>
-        <div className="per-page">10 / 페이지</div>
-      </div>
-    </>
+    <table className="grid contract-grid">
+      <thead><tr><th>계약번호</th><th className="center-th">계약자명</th><th>근무여부</th><th>계약종류</th><th>추천인</th><th>계약일자</th><th>수당지급일</th><th>계약종료일</th><th>보증금액</th><th>수당</th><th className="center-th">상태</th><th className="center-th">계좌검증</th><th>상세</th></tr></thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.no}>
+            <td>{r.no}</td><td>{r.name}</td><td><input className="work-check" type="checkbox" defaultChecked={r.name !== "박지민"} /></td><td>{r.type}</td><td>{r.ref}</td><td>{r.contractDate}</td><td>{r.payoutDate}</td><td>{r.endDate}</td><td>{r.depositAmount}</td><td>{r.allowanceAmount}</td>
+            <td><span className={`status-fixed ${statusClass(r.status || "")}`}>{compactStatus(r.status || "")}</span></td><td><span className={`verify-fixed ${(r.verify || "").includes("오류") ? "err" : "ok"}`}>{compactVerify(r.verify || "미검증")}</span></td>
+            <td><button className="icon-btn" onClick={() => onDetail(r)}><Eye size={14} /></button></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
-function ContractList({ onCreate, onDetail }: { onCreate: () => void; onDetail: () => void }) {
+function ContractList({ onCreate, onDetail, rows }: { onCreate: () => void; onDetail: (row: ContractRowData) => void; rows: ContractRowData[] }) {
+  const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(20);
+
+  const filtered = rows.filter((r) => {
+    const q = search.trim().toLowerCase();
+    if (q && !r.no.toLowerCase().includes(q) && !r.name.toLowerCase().includes(q) && !(r.ref || "").toLowerCase().includes(q)) return false;
+    if (dateFrom && r.contractDate < dateFrom) return false;
+    if (dateTo && r.contractDate > dateTo) return false;
+    return true;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
+  const safePage = Math.min(page, totalPages);
+  const paged = filtered.slice((safePage - 1) * perPage, safePage * perPage);
+
+  const handleReset = () => { setSearch(""); setDateFrom(""); setDateTo(""); setPage(1); };
+
+  const pageButtons = (): (number | "...")[] => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const pages: (number | "...")[] = [1];
+    if (safePage > 4) pages.push("...");
+    for (let i = Math.max(2, safePage - 2); i <= Math.min(totalPages - 1, safePage + 2); i++) pages.push(i);
+    if (safePage < totalPages - 3) pages.push("...");
+    pages.push(totalPages);
+    return pages;
+  };
+
   return (
     <div>
       <PageHeader title="계약 관리" desc="계약 목록을 조회하고 관리할 수 있습니다." />
       <section className="card">
-        <div className="filter-row"><div className="search-box"><Search size={16} /> 계약번호, 계약자명, 추천인 검색</div><button className="primary-btn" onClick={onCreate}><Plus size={16} /> 신규 계약 등록</button></div>
-        <div className="contract-filters">
-          <div className="filters">{["계약종류", "계약상태", "추천인", "계약일자", "계좌검증"].map((x) => <div className="select" key={x}>{x}<ChevronDown size={15} /></div>)}</div>
-          <button className="line-btn">초기화</button>
+        <div className="contract-filter-bar">
+          <div className="search-box">
+            <Search size={16} />
+            <input className="input-input" placeholder="계약번호, 계약자명, 추천인 검색" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
+          </div>
+          <input className="date-filter-input" type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} />
+          <span className="date-sep">~</span>
+          <input className="date-filter-input" type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }} />
+          <button className="line-btn" onClick={handleReset}>초기화</button>
+          <button className="primary-btn" onClick={onCreate}><Plus size={16} /> 신규 계약 등록</button>
         </div>
       </section>
-      <section className="card"><div className="card-title-sm">전체 1,245건</div><ContractListTable onDetail={onDetail} /><div className="contract-footnote">* 최근 10건의 계약을 표시합니다.</div></section>
+      <section className="card">
+        <div className="card-title-sm">전체 {filtered.length.toLocaleString("ko-KR")}건</div>
+        <ContractListTable onDetail={onDetail} rows={paged} />
+        <div className="contract-pagination">
+          <div className="pager">
+            <button className="pager-btn" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={safePage === 1}>‹</button>
+            {pageButtons().map((p, i) =>
+              p === "..." ? <span key={`el-${i}`} className="pager-ellipsis">…</span> : (
+                <button key={p} className={`pager-btn${safePage === p ? " active" : ""}`} onClick={() => setPage(p as number)}>{p}</button>
+              )
+            )}
+            <button className="pager-btn" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={safePage === totalPages}>›</button>
+          </div>
+          <div className="pager-right">
+            {[20, 50, 100].map((n) => (
+              <button key={n} className={`pager-btn${perPage === n ? " active" : ""}`} onClick={() => { setPerPage(n); setPage(1); }}>{n}개</button>
+            ))}
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
 
 function ContractCreate({ onBack }: { onBack: () => void }) {
-  const [contractDate, setContractDate] = useState("2024-05-20");
-  const [payoutDate, setPayoutDate] = useState(addMonths("2024-05-20", 2));
+  const [contractTypes, setContractTypes] = useState<ContractTypeRow[]>([]);
+  const [referrers, setReferrers] = useState<{ id: number; name: string }[]>([]);
+  const [selectedType, setSelectedType] = useState<ContractTypeRow | null>(null);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const [contractDate, setContractDate] = useState(today);
+  const [payoutDate, setPayoutDate] = useState(addMonths(today, 2));
   const [manualPayout, setManualPayout] = useState(false);
-  const [contractName, setContractName] = useState("LAS점장점주");
-  const [isWorking, setIsWorking] = useState(true);
-  const endDate = addYears(contractDate, 3);
+  const [workType, setWorkType] = useState<"4일" | "2일" | "미근무">("4일");
+
+  const [deposit, setDeposit] = useState("");
+  const [allowance, setAllowance] = useState("");
+  const [manualAllowance, setManualAllowance] = useState(false);
+  const [referrerId, setReferrerId] = useState("");
+  const [contractorName, setContractorName] = useState("");
+  const [rrn, setRrn] = useState("");
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [accountNo, setAccountNo] = useState("");
+  const [accountOwner, setAccountOwner] = useState("");
+  const [manualEnd, setManualEnd] = useState(false);
+  const [endDateOverride, setEndDateOverride] = useState("");
+
+  const endDate = manualEnd ? endDateOverride : addYears(contractDate, selectedType?.contractYears ?? 3);
   const contractNo = `LASM-${compactDate(contractDate)}-011`;
+
+  useEffect(() => {
+    fetch(`${API_BASE}/contract-types`).then((r) => r.json()).then((d) => {
+      const types: ContractTypeRow[] = Array.isArray(d.rows) ? d.rows : [];
+      setContractTypes(types);
+      if (types.length > 0) setSelectedType(types[0]);
+    }).catch(() => {});
+    fetch(`${API_BASE}/referrers`).then((r) => r.json()).then((d) => {
+      setReferrers(Array.isArray(d.rows) ? d.rows : []);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (manualAllowance || !selectedType?.rules?.length) return;
+    const depositNum = Number(deposit.replace(/[^\d]/g, ""));
+    if (!depositNum) { setAllowance(""); return; }
+    const sorted = [...selectedType.rules].sort((a, b) => a.deposit - b.deposit);
+    let matched = sorted[0];
+    for (const rule of sorted) { if (rule.deposit <= depositNum) matched = rule; }
+    if (matched) {
+      const amt = workType === "4일" ? matched.workAmount4 : workType === "2일" ? matched.workAmount2 : matched.nonWorkAmount;
+      setAllowance(amt.toLocaleString("ko-KR"));
+    }
+  }, [deposit, workType, selectedType, manualAllowance]);
 
   const handleContractDate = (value: string) => {
     setContractDate(value);
-    if (!manualPayout) {
-      setPayoutDate(addMonths(value, 2));
-    }
+    if (!manualPayout) setPayoutDate(addMonths(value, selectedType?.payoutMonths ?? 2));
+    if (!manualEnd) setEndDateOverride(addYears(value, selectedType?.contractYears ?? 3));
+  };
+
+  const handleTypeChange = (id: number) => {
+    const t = contractTypes.find((x) => x.id === id) ?? null;
+    setSelectedType(t);
+    setManualAllowance(false);
+    if (!manualPayout) setPayoutDate(addMonths(contractDate, t?.payoutMonths ?? 2));
   };
 
   return (
@@ -224,10 +348,9 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
         <div className="basic-grid">
           <label className="field">
             <span>계약명</span>
-            <select className="input-input" value={contractName} onChange={(e) => setContractName(e.target.value)}>
-              <option value="LAS점장점주">LAS점장점주</option>
-              <option value="LAS점장점주(기본형)">LAS점장점주(기본형)</option>
-              <option value="LAS점장점주(확장형)">LAS점장점주(확장형)</option>
+            <select className="input-input" value={selectedType?.id ?? ""} onChange={(e) => handleTypeChange(Number(e.target.value))}>
+              {contractTypes.length === 0 && <option value="">계약서 없음 — 시스템관리에서 먼저 등록하세요</option>}
+              {contractTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </label>
           <label className="field"><span>계약번호(자동)</span><div className="input">{contractNo}</div></label>
@@ -239,32 +362,43 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
           <div className="card-title-sm">계약정보</div>
           <label className="switch-row">
             <span>근무여부</span>
-            <button type="button" className={isWorking ? "toggle on" : "toggle"} onClick={() => setIsWorking((v) => !v)}>
-              <span className="knob" />
-            </button>
-            <b>{isWorking ? "근무" : "미근무"}</b>
+            <select className="input-input work-type-select" value={workType} onChange={(e) => { setWorkType(e.target.value as "4일" | "2일" | "미근무"); setManualAllowance(false); }}>
+              <option value="4일">4일근무</option>
+              <option value="2일">2일근무</option>
+              <option value="미근무">미근무</option>
+            </select>
           </label>
         </div>
-        <div className="contract-info-row five">
-          <label className="field"><span>추천인명</span><input className="input-input" placeholder="추천인명" /></label>
-          <label className="field"><span>계약자명</span><input className="input-input" placeholder="계약자명" /></label>
-          <label className="field"><span>주민번호</span><input className="input-input" placeholder="주민번호" /></label>
-          <label className="field"><span>연락처</span><input className="input-input" placeholder="연락처" /></label>
-          <label className="field"><span>수당</span><input className="input-input" defaultValue="1500000" /></label>
-        </div>
-        <div className="contract-info-row four">
-          <label className="field"><span>주소</span><input className="input-input" placeholder="주소" /></label>
+        <div className="contract-info-row create-row">
           <label className="field">
-            <span>계약일자</span>
-            <input className="input-input" type="date" value={contractDate} onChange={(e) => handleContractDate(e.target.value)} />
+            <span>추천인명</span>
+            <select className="input-input" value={referrerId} onChange={(e) => setReferrerId(e.target.value)}>
+              <option value="">-- 선택 --</option>
+              {referrers.map((r) => <option key={r.id} value={String(r.id)}>{r.name}</option>)}
+            </select>
           </label>
+          <label className="field"><span>계약자명</span><input className="input-input" placeholder="계약자명" value={contractorName} onChange={(e) => setContractorName(e.target.value)} /></label>
+          <label className="field"><span>주민번호</span><input className="input-input" placeholder="000000-0000000" value={rrn} onChange={(e) => setRrn(rrnFmt(e.target.value))} maxLength={14} /></label>
+          <label className="field"><span>연락처</span><input className="input-input" placeholder="010-0000-0000" value={phone} onChange={(e) => setPhone(phoneFmt(e.target.value))} maxLength={13} /></label>
+          <label className="field"><span>주소</span><input className="input-input" placeholder="주소" value={address} onChange={(e) => setAddress(e.target.value)} /></label>
+        </div>
+        <div className="contract-info-row create-row">
+          <label className="field">
+            <span>보증금(원)</span>
+            <input className="input-input" placeholder="0" value={deposit} onChange={(e) => { setDeposit(numFmt(e.target.value)); setManualAllowance(false); }} />
+          </label>
+          <label className="field">
+            <span>수당(원)</span>
+            <input className="input-input" placeholder="0" value={allowance} onChange={(e) => { setAllowance(numFmt(e.target.value)); setManualAllowance(true); }} />
+          </label>
+          <label className="field"><span>계약일</span><input className="input-input" type="date" value={contractDate} onChange={(e) => handleContractDate(e.target.value)} /></label>
           <label className="field">
             <span>수당지급일</span>
             <input className="input-input" type="date" value={payoutDate} onChange={(e) => { setManualPayout(true); setPayoutDate(e.target.value); }} />
           </label>
           <label className="field">
             <span>계약종료일</span>
-            <input className="input-input" type="date" value={endDate} readOnly />
+            <input className="input-input" type="date" value={endDate} onChange={(e) => { setManualEnd(true); setEndDateOverride(e.target.value); }} />
           </label>
         </div>
       </section>
@@ -272,9 +406,12 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
       <section className="card">
         <div className="card-title-sm">계좌정보</div>
         <div className="account-inline">
-          <input className="input-input" placeholder="은행명" />
-          <input className="input-input" placeholder="계좌번호" />
-          <input className="input-input" placeholder="예금주" />
+          <select className="input-input" value={bankName} onChange={(e) => setBankName(e.target.value)}>
+            <option value="">-- 은행/기관 선택 --</option>
+            {BANKS.map((b) => <option key={b} value={b}>{b}</option>)}
+          </select>
+          <input className="input-input" placeholder="계좌번호" value={accountNo} onChange={(e) => setAccountNo(e.target.value)} />
+          <input className="input-input" placeholder="예금주" value={accountOwner} onChange={(e) => setAccountOwner(e.target.value)} />
           <button className="primary-btn action-btn">계좌실명확인</button>
         </div>
       </section>
@@ -291,9 +428,49 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
   );
 }
 
-function DetailBasicTab() { return <section className="card"><div className="card-title-sm">기본정보</div><table className="grid"><tbody><tr><th>계약번호</th><td>LASM-20240520-001</td><th>계약일</th><td>2024-05-20</td></tr><tr><th>계약종류</th><td>LAS점장점주</td><th>종료일</th><td>2027-05-20</td></tr><tr><th>계약자명</th><td>김영수</td><th>보증금액</th><td>1,000,000,000 원</td></tr><tr><th>주민번호</th><td>900101-1******</td><th>근무여부</th><td>근무중</td></tr><tr><th>연락처</th><td>010-1234-5678</td><th>계약상태</th><td>정상운영</td></tr></tbody></table></section>; }
-function DetailDocumentTab() { return <section className="card"><div className="card-title-sm">계약서/입금표</div><div className="two-col"><div className="card"><div className="card-title-sm">계약서 PDF</div><div className="input pdf-preview">PDF 미리보기 영역</div><div className="actions detail-file-actions"><button className="line-btn">다운로드</button><button className="line-btn">교체등록</button></div></div><div className="card"><div className="card-title-sm">입금표 PDF</div><div className="input pdf-preview">PDF 미리보기 영역</div><div className="actions detail-file-actions"><button className="line-btn">다운로드</button><button className="line-btn">교체등록</button></div></div></div></section>; }
-function DetailAllowanceTab() { return <section className="card"><div className="card-title-sm">수당정보</div><table className="grid"><thead><tr><th>기준월</th><th>산정수당</th><th>공제</th><th>실지급예정금액</th><th>지급상태</th></tr></thead><tbody>{Array.from({ length: 8 }).map((_, i) => <tr key={i}><td>2024-{String(i + 5).padStart(2, "0")}</td><td>100,000 원</td><td>10,000 원</td><td>90,000 원</td><td><span className="badge green">지급완료</span></td></tr>)}</tbody></table></section>; }
+function DetailBasicTab({ row }: { row: ContractRowData | null }) {
+  return (
+    <section className="card">
+      <div className="card-title-sm">기본정보</div>
+      <table className="grid"><tbody>
+        <tr><th>계약번호</th><td>{row?.no ?? "-"}</td><th>계약일</th><td>{row?.contractDate ?? "-"}</td></tr>
+        <tr><th>계약종류</th><td>{row?.type ?? "-"}</td><th>계약종료일</th><td>{row?.endDate ?? "-"}</td></tr>
+        <tr><th>계약자명</th><td>{row?.name ?? "-"}</td><th>보증금액</th><td>{row?.depositAmount || "-"}</td></tr>
+        <tr><th>주민번호</th><td>-</td><th>첫수당지급일</th><td>{row?.payoutDate ?? "-"}</td></tr>
+        <tr><th>연락처</th><td>{row?.phone || "-"}</td><th>계약상태</th><td>{row?.status ?? "정상운영"}</td></tr>
+      </tbody></table>
+    </section>
+  );
+}
+function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
+  const pdfLabel = row ? `${row.type}_${row.contractDate}_${row.name}.pdf` : "";
+  return (
+    <section className="card">
+      <div className="card-title-sm">계약서/입금표</div>
+      <div className="two-col">
+        <div className="card">
+          <div className="card-title-sm">계약서 PDF</div>
+          <div className="pdf-filename">{pdfLabel || "파일 미등록"}</div>
+          <div className="pdf-empty-box">파일이 등록되지 않았습니다</div>
+          <div className="actions detail-file-actions">
+            <button className="primary-btn" disabled style={{ opacity: 0.45 }}>계약서 보기</button>
+            <button className="line-btn">파일 등록</button>
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-title-sm">입금표 PDF</div>
+          <div className="pdf-filename">파일 미등록</div>
+          <div className="pdf-empty-box">파일이 등록되지 않았습니다</div>
+          <div className="actions detail-file-actions">
+            <button className="primary-btn" disabled style={{ opacity: 0.45 }}>입금표 보기</button>
+            <button className="line-btn">파일 등록</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+function DetailAllowanceTab() { return <section className="card"><div className="card-title-sm">수당정보</div><table className="grid"><thead><tr><th>기준월</th><th>산정수당</th><th>공제</th><th>실지급예정금액</th><th>지급상태</th></tr></thead><tbody><tr><td colSpan={5}>수당 정보가 없습니다.</td></tr></tbody></table></section>; }
 function DetailAccountTab() { return <section className="card"><div className="card-title-sm">현재 계좌 정보</div><table className="grid"><tbody><tr><th>은행명</th><td>신한은행</td></tr><tr><th>계좌번호</th><td>110-123-456789</td></tr><tr><th>예금주명</th><td>김영수</td></tr><tr><th>계좌실명조회 상태</th><td><span className="badge green">실명조회 일치</span></td></tr></tbody></table></section>; }
 function DetailHistoryTab({
   rows,
@@ -306,69 +483,57 @@ function DetailHistoryTab({
 }
 function DetailMemoTab() { return <section className="card"><div><div className="card-title-sm">메모 작성</div><div className="input memo-box">메모를 입력하세요...</div><div className="actions detail-file-actions"><button className="line-btn">파일 첨부</button><button className="primary-btn">등록</button></div></div></section>; }
 
-function ReferrerPage() {
-  const [referrerRows, setReferrerRows] = useState(
-    Array.from({ length: 10 }).map((_, i) => ({
-      id: i + 1,
-      name: "김영수",
-      org: "영업1팀",
-      phone: "010-1234-5678",
-      title: "대리",
-      contracts: "28건",
-      allowance: "3,520,000 원",
-      status: "활성"
-    }))
-  );
+const API_BASE = "https://asia-northeast3-contractmanager-32072.cloudfunctions.net/api";
 
-  const [editingReferrer, setEditingReferrer] = useState<null | { id: number; name: string; org: string; phone: string; title: string }>(null);
+type ReferrerRow = { id: number; name: string; org: string; phone: string; title: string; status: string };
+
+function ReferrerPage() {
+  const [referrerRows, setReferrerRows] = useState<ReferrerRow[]>([]);
+  const [editingReferrer, setEditingReferrer] = useState<ReferrerRow | null>(null);
   const [modalForm, setModalForm] = useState({ name: "", org: "", phone: "", title: "" });
   const [referrerForm, setReferrerForm] = useState({ name: "", org: "", phone: "", title: "" });
 
+  const fetchReferrers = () => {
+    fetch(`${API_BASE}/referrers`)
+      .then(res => res.json())
+      .then(data => setReferrerRows(Array.isArray(data.rows) ? data.rows : []))
+      .catch(() => {});
+  };
+
+  useEffect(() => { fetchReferrers(); }, []);
+
+  const total = referrerRows.length;
+  const active = referrerRows.filter(r => r.status === "활성").length;
+  const activeRate = total > 0 ? `${((active / total) * 100).toFixed(1)}%` : "-";
+
   const referrerStats = [
-    { label: "총 추천인", value: "186 명", sub: "전체 추천인 수", icon: <Users size={24} />, tone: "blue" },
-    { label: "활성 추천인", value: "152 명", sub: "81.7%", icon: <CheckCircle2 size={24} />, tone: "green" },
-    { label: "계약 연결 수", value: "1,245 건", sub: "전체 계약 연결", icon: <Link2 size={24} />, tone: "orange" },
-    { label: "수당 합계", value: "124,568,000 원", sub: "전체 지급 예정/지급 합계", icon: <CircleDollarSign size={24} />, tone: "violet" }
+    { label: "총 추천인", value: `${total} 명`, sub: "전체 추천인 수", icon: <Users size={24} />, tone: "blue" },
+    { label: "활성 추천인", value: `${active} 명`, sub: activeRate, icon: <CheckCircle2 size={24} />, tone: "green" },
+    { label: "계약 연결 수", value: "0 건", sub: "전체 계약 연결", icon: <Link2 size={24} />, tone: "orange" },
+    { label: "수당 합계", value: "0 원", sub: "전체 지급 예정/지급 합계", icon: <CircleDollarSign size={24} />, tone: "violet" }
   ] as const;
 
-  const openReferrerDetail = (row: { id: number; name: string; org: string; phone: string; title: string }) => {
+  const openReferrerDetail = (row: ReferrerRow) => {
     setEditingReferrer(row);
     setModalForm({ name: row.name, org: row.org, phone: row.phone, title: row.title });
   };
 
-  const closeReferrerDetail = () => {
-    setEditingReferrer(null);
-  };
-
   const saveReferrerDetail = () => {
     if (!editingReferrer) return;
-    setReferrerRows((prev) =>
-      prev.map((row) =>
-        row.id === editingReferrer.id
-          ? { ...row, name: modalForm.name, org: modalForm.org, phone: modalForm.phone, title: modalForm.title }
-          : row
-      )
-    );
-    setEditingReferrer(null);
+    fetch(`${API_BASE}/referrers/${editingReferrer.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: modalForm.name, org: modalForm.org, phone: modalForm.phone, title: modalForm.title })
+    }).then(() => { fetchReferrers(); setEditingReferrer(null); }).catch(() => {});
   };
 
   const saveReferrerForm = () => {
     if (!referrerForm.name.trim() || !referrerForm.org.trim() || !referrerForm.phone.trim()) return;
-    const nextId = referrerRows.length ? Math.max(...referrerRows.map((r) => r.id)) + 1 : 1;
-    setReferrerRows((prev) => [
-      {
-        id: nextId,
-        name: referrerForm.name.trim(),
-        org: referrerForm.org.trim(),
-        phone: referrerForm.phone.trim(),
-        title: referrerForm.title.trim() || "사원",
-        contracts: "0건",
-        allowance: "0 원",
-        status: "활성"
-      },
-      ...prev
-    ]);
-    setReferrerForm({ name: "", org: "", phone: "", title: "" });
+    fetch(`${API_BASE}/referrers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: referrerForm.name.trim(), org: referrerForm.org.trim(), phone: referrerForm.phone.trim(), title: referrerForm.title.trim() || "사원" })
+    }).then(() => { fetchReferrers(); setReferrerForm({ name: "", org: "", phone: "", title: "" }); }).catch(() => {});
   };
 
   return (
@@ -398,44 +563,36 @@ function ReferrerPage() {
           </div>
           <div className="referrer-table-scroll">
             <table className="grid referrer-grid">
-                        <thead><tr><th>이름</th><th>소속</th><th>전화번호</th><th>직급</th><th>등록계약 수</th><th>지급수당 합계</th><th>상태</th><th>상세</th></tr></thead>
-                        <tbody>
-                          {referrerRows.map((row) => (
-                            <tr key={row.id}>
-                              <td>{row.name}</td><td>{row.org}</td><td>{row.phone}</td><td>{row.title}</td><td>{row.contracts}</td><td>{row.allowance}</td><td><span className="badge green">{row.status}</span></td><td><button className="icon-btn" onClick={() => openReferrerDetail(row)}><Eye size={14} /></button></td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+              <thead><tr><th>이름</th><th>소속</th><th>전화번호</th><th>직급</th><th>상태</th><th>상세</th></tr></thead>
+              <tbody>
+                {referrerRows.length === 0
+                  ? <tr><td colSpan={6} style={{ textAlign: "center", color: "#8a97ac", padding: "24px" }}>등록된 추천인이 없습니다.</td></tr>
+                  : referrerRows.map((row) => (
+                    <tr key={row.id}>
+                      <td>{row.name}</td><td>{row.org}</td><td>{row.phone}</td><td>{row.title}</td>
+                      <td><span className={`badge ${row.status === "활성" ? "green" : "amber"}`}>{row.status}</span></td>
+                      <td><button className="icon-btn" onClick={() => openReferrerDetail(row)}><Eye size={14} /></button></td>
+                    </tr>
+                  ))
+                }
+              </tbody>
+            </table>
           </div>
-          <div className="helper-text">지급수당 합계: 해당 추천인에게 누적 확정/지급된 수당 총액</div>
         </div>
         <div>
           <div className="card-title-sm">추천인 등록</div>
           <div className="side-form">
-            <label className="field">
-              <span>이름<b className="req"> *</b></span>
-              <input className="input-input" placeholder="이름 입력" value={referrerForm.name} onChange={(e) => setReferrerForm((prev) => ({ ...prev, name: e.target.value }))} />
-            </label>
-            <label className="field">
-              <span>소속<b className="req"> *</b></span>
-              <input className="input-input" placeholder="소속 입력" value={referrerForm.org} onChange={(e) => setReferrerForm((prev) => ({ ...prev, org: e.target.value }))} />
-            </label>
-            <label className="field">
-              <span>전화번호<b className="req"> *</b></span>
-              <input className="input-input" placeholder="010-0000-0000" inputMode="numeric" value={referrerForm.phone} onChange={(e) => setReferrerForm((prev) => ({ ...prev, phone: formatPhoneNumber(e.target.value) }))} />
-            </label>
-            <label className="field">
-              <span>직급</span>
-              <input className="input-input" placeholder="직급 입력" value={referrerForm.title} onChange={(e) => setReferrerForm((prev) => ({ ...prev, title: e.target.value }))} />
-            </label>
+            <label className="field"><span>이름<b className="req"> *</b></span><input className="input-input" placeholder="이름 입력" value={referrerForm.name} onChange={(e) => setReferrerForm((prev) => ({ ...prev, name: e.target.value }))} /></label>
+            <label className="field"><span>소속<b className="req"> *</b></span><input className="input-input" placeholder="소속 입력" value={referrerForm.org} onChange={(e) => setReferrerForm((prev) => ({ ...prev, org: e.target.value }))} /></label>
+            <label className="field"><span>전화번호<b className="req"> *</b></span><input className="input-input" placeholder="010-0000-0000" inputMode="numeric" value={referrerForm.phone} onChange={(e) => setReferrerForm((prev) => ({ ...prev, phone: formatPhoneNumber(e.target.value) }))} /></label>
+            <label className="field"><span>직급</span><input className="input-input" placeholder="직급 입력" value={referrerForm.title} onChange={(e) => setReferrerForm((prev) => ({ ...prev, title: e.target.value }))} /></label>
           </div>
           <div className="actions referrer-actions"><button className="line-btn" onClick={() => setReferrerForm({ name: "", org: "", phone: "", title: "" })}>취소</button><button className="primary-btn" onClick={saveReferrerForm}>저장</button></div>
         </div>
       </section>
 
       {editingReferrer && (
-        <div className="modal-backdrop" onClick={closeReferrerDetail}>
+        <div className="modal-backdrop" onClick={() => setEditingReferrer(null)}>
           <section className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="card-title-sm">추천인 정보 상세</div>
             <div className="side-form">
@@ -445,7 +602,7 @@ function ReferrerPage() {
               <label className="field"><span>직급</span><input className="input-input" value={modalForm.title} onChange={(e) => setModalForm((prev) => ({ ...prev, title: e.target.value }))} /></label>
             </div>
             <div className="actions modal-actions">
-              <button className="line-btn" onClick={closeReferrerDetail}>취소</button>
+              <button className="line-btn" onClick={() => setEditingReferrer(null)}>취소</button>
               <button className="primary-btn" onClick={saveReferrerDetail}>저장</button>
             </div>
           </section>
@@ -456,46 +613,57 @@ function ReferrerPage() {
 }
 
 
-function AllowancePage() {
-  const currentYear = new Date().getFullYear();
-  const initialStartDate = `${currentYear}-05-01`;
-  const initialEndDate = `${currentYear}-06-30`;
-  const [startDate, setStartDate] = useState(initialStartDate);
-  const [endDate, setEndDate] = useState(initialEndDate);
+function AllowancePage({ rows }: { rows: ContractRowData[] }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [startDate, setStartDate] = useState(today);
+  const [endDate, setEndDate] = useState(today);
   const [contractorFilter, setContractorFilter] = useState("전체");
   const [verifyFilter, setVerifyFilter] = useState("전체");
-  const [statusFilter, setStatusFilter] = useState("전체");
+  const [perPage, setPerPage] = useState(20);
+  const [page, setPage] = useState(1);
 
-  const allowanceRows = contractRows.map((r, i) => {
-    const year = new Date().getFullYear();
-    const day = String(i + 1).padStart(2, "0");
-    const baseDate = i < 5 ? `${year}-05-${day}` : `${year}-06-${String(i - 4).padStart(2, "0")}`;
-    const accountNo = `1234-5678-${String(100000 + i).padStart(6, "0")}`;
-    return ({
-    ...r,
-    baseDate,
-    amount: 320000 + i * 10000,
-    bankName: "국민은행",
-    accountNo,
-    accountMasked: accountNo.replace(/(\d{4}-)\d{4}-(\d{6})/, "$1****-$2"),
-    verifyStatus: i === 2 || i === 7 ? "검증오류" : i === 4 ? "검증중" : "검증완료",
-    payStatus: r.status.includes("지급") ? r.status : "지급대기"
-    });
+  const allowanceRows = (rows || []).map((r) => {
+    const rawAccountNo = r.accountNo || "";
+    const masked = rawAccountNo.length > 4
+      ? rawAccountNo.slice(0, rawAccountNo.length - 4).replace(/\d/g, "*") + rawAccountNo.slice(-4)
+      : rawAccountNo;
+    return {
+      ...r,
+      baseDate: r.contractDate || r.payoutDate || "",
+      amount: Number(r.allowanceAmountRaw ?? 0),
+      bankName: r.bankName || "",
+      accountNo: rawAccountNo,
+      accountMasked: masked || "",
+      verifyStatus: "검증완료",
+    };
   });
 
   const filteredRows = allowanceRows.filter((row) => {
-    const inDate = row.baseDate >= startDate && row.baseDate <= endDate;
+    const inDate = !startDate || !endDate || !row.baseDate || (row.baseDate >= startDate && row.baseDate <= endDate);
     const inContractor = contractorFilter === "전체" || row.name === contractorFilter;
     const inVerify = verifyFilter === "전체" || row.verifyStatus === verifyFilter;
-    const inStatus = statusFilter === "전체" || row.payStatus === statusFilter;
-    return inDate && inContractor && inVerify && inStatus;
+    return inDate && inContractor && inVerify;
   });
   const totalAmount = filteredRows.reduce((sum, row) => sum + row.amount, 0);
   const confirmedAmount = filteredRows.filter((row) => row.status.includes("지급확정") || row.status.includes("정상운영")).reduce((sum, row) => sum + row.amount, 0);
   const completedAmount = filteredRows.filter((row) => row.status.includes("정상운영")).reduce((sum, row) => sum + row.amount, 0);
   const holdAmount = filteredRows.filter((row) => row.status.includes("대기") || row.status.includes("변경")).reduce((sum, row) => sum + row.amount, 0);
 
-  const amountText = (value: number) => `${value.toLocaleString("ko-KR")} 원`;
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / perPage));
+  const safePage = Math.min(page, totalPages);
+  const pagedRows = filteredRows.slice((safePage - 1) * perPage, safePage * perPage);
+
+  const pageButtons = (): (number | "...")[] => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const pages: (number | "...")[] = [1];
+    if (safePage > 4) pages.push("...");
+    for (let i = Math.max(2, safePage - 2); i <= Math.min(totalPages - 1, safePage + 2); i++) pages.push(i);
+    if (safePage < totalPages - 3) pages.push("...");
+    pages.push(totalPages);
+    return pages;
+  };
+
+  const amountText = (value: number) => `${Number(value).toLocaleString("ko-KR")} 원`;
   const paidAmount = (value: number) => Math.round(value * 0.967);
 
   const exportFilteredList = async () => {
@@ -547,7 +715,7 @@ function AllowancePage() {
   const topStats = [
     { label: "지급대상 건수", value: `${filteredRows.length} 건`, sub: "기간 필터 기준", icon: <Wallet size={22} />, tone: "blue" },
     { label: "지급예정 금액", value: amountText(totalAmount), sub: "기간 내 총 예상 지급", icon: <CircleDollarSign size={22} />, tone: "green" },
-    { label: "지급보류 건수", value: `${filteredRows.filter((r) => r.status.includes("대기") || r.status.includes("변경")).length} 건`, sub: "대기/변경 건수", icon: <Landmark size={22} />, tone: "orange" }
+    { label: "지급보류 건수", value: `${filteredRows.filter((r) => (r.status || "").includes("대기") || (r.status || "").includes("변경")).length} 건`, sub: "대기/변경 건수", icon: <Landmark size={22} />, tone: "orange" }
   ] as const;
 
   return (
@@ -571,7 +739,7 @@ function AllowancePage() {
         <div className="allowance-period-filter">
           <label className="field">
             <span>시작일</span>
-            <input className="input-input" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setEndDate(e.target.value); }} />
+            <input className="input-input" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); if (endDate < e.target.value) setEndDate(e.target.value); }} />
           </label>
           <label className="field">
             <span>종료일</span>
@@ -595,35 +763,43 @@ function AllowancePage() {
               <option value="검증오류">검증오류</option>
             </select>
           </label>
-          <label className="field">
-            <span>지급상태</span>
-            <select className="input-input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-              <option value="전체">전체</option>
-              {[...new Set(allowanceRows.map((r) => r.payStatus))].map((status) => (
-                <option key={status} value={status}>{status}</option>
-              ))}
-            </select>
-          </label>
           <div className="allowance-filter-actions">
-          <button className="line-btn allowance-reset-btn" onClick={() => { setStartDate(initialStartDate); setEndDate(initialEndDate); setContractorFilter("전체"); setVerifyFilter("전체"); setStatusFilter("전체"); }}>초기화</button>
+            <button className="line-btn allowance-reset-btn" onClick={() => { setStartDate(today); setEndDate(today); setContractorFilter("전체"); setVerifyFilter("전체"); setPage(1); }}>초기화</button>
             <button className="primary-btn allowance-export-btn" onClick={exportFilteredList}>출력</button>
           </div>
         </div>
       </section>
 
       <section className="card">
+        <div className="card-title-sm">전체 {filteredRows.length.toLocaleString("ko-KR")}건</div>
         <table className="grid allowance-grid">
           <thead>
-            <tr><th>기준일</th><th>계약자명</th><th>추천인</th><th>은행명</th><th>계좌번호</th><th>수당</th><th>지급금액</th><th>계좌검증</th><th>지급상태</th></tr>
+            <tr><th>기준일</th><th>계약자명</th><th>추천인</th><th>은행명</th><th>계좌번호</th><th>수당</th><th>지급금액</th><th>계좌검증</th></tr>
           </thead>
           <tbody>
-            {filteredRows.map((r) => (
+            {pagedRows.map((r) => (
               <tr key={r.no}>
-                <td>{r.baseDate}</td><td>{r.name}</td><td>{r.ref}</td><td>{r.bankName}</td><td>{r.accountMasked}</td><td>{amountText(r.amount)}</td><td>{amountText(paidAmount(r.amount))}</td><td><span className={r.verifyStatus.includes("오류") ? "err" : r.verifyStatus.includes("중") ? "" : "ok"}>{r.verifyStatus}</span></td><td><span className={`badge ${statusClass(r.payStatus)}`}>{r.payStatus}</span></td>
+                <td>{r.baseDate}</td><td>{r.name}</td><td>{r.ref}</td><td>{r.bankName}</td><td>{r.accountMasked}</td><td>{amountText(r.amount)}</td><td>{amountText(paidAmount(r.amount))}</td><td><span className={r.verifyStatus.includes("오류") ? "err" : r.verifyStatus.includes("중") ? "" : "ok"}>{r.verifyStatus}</span></td>
               </tr>
             ))}
           </tbody>
         </table>
+        <div className="contract-pagination">
+          <div className="pager">
+            <button className="pager-btn" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={safePage === 1}>‹</button>
+            {pageButtons().map((p, i) =>
+              p === "..." ? <span key={`el-${i}`} className="pager-ellipsis">…</span> : (
+                <button key={p} className={`pager-btn${safePage === p ? " active" : ""}`} onClick={() => setPage(p as number)}>{p}</button>
+              )
+            )}
+            <button className="pager-btn" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={safePage === totalPages}>›</button>
+          </div>
+          <div className="pager-right">
+            {[20, 50, 100].map((n) => (
+              <button key={n} className={`pager-btn${perPage === n ? " active" : ""}`} onClick={() => { setPerPage(n); setPage(1); }}>{n}개</button>
+            ))}
+          </div>
+        </div>
       </section>
 
       <section className="card total-strip allowance-total-strip">
@@ -648,7 +824,7 @@ function AllowancePage() {
   );
 }
 
-function AccountPage() {
+function AccountPage({ rows }: { rows: ContractRowData[] }) {
   type AccountRow = {
     no: string;
     name: string;
@@ -668,7 +844,7 @@ function AccountPage() {
   };
 
   const baseRows: AccountRow[] = Array.from({ length: 20 }).map((_, i) => {
-    const r = contractRows[i % contractRows.length];
+    const r = (rows || [])[i % (rows || []).length];
     const verifyStatus = i < 8 ? "일치" : i < 12 ? "불일치" : i < 16 ? "미조회" : "재확인 필요";
     const errorDetail =
       verifyStatus === "불일치"
@@ -893,7 +1069,7 @@ function AccountPage() {
 }
 
 
-function ChangePage() {
+function ChangePage({ rows: contractRows }: { rows: ContractRowData[] }) {
   type FieldChange = {
     field: string;
     before: string;
@@ -941,33 +1117,33 @@ function ChangePage() {
     id: `chg-${i + 1}`,
     requestedAt: `2024-05-20 14:${String(30 + i).padStart(2, "0")}`,
     contractNo: `LASM-202405${String(20 - i).padStart(2, "0")}-${String(i + 1).padStart(3, "0")}`,
-    contractor: contractRows[i].name,
-    workFlag: contractRows[i].name !== "박지민",
+    contractor: (contractRows || [])[i]?.name ?? "-",
+    workFlag: (contractRows || [])[i]?.name !== "박지민",
     contractType: "LAS점장점주",
-    referrer: contractRows[i].ref,
-    contractDate: contractRows[i].contractDate,
-    payoutDate: contractRows[i].payoutDate,
-    endDate: contractRows[i].endDate,
+    referrer: (contractRows || [])[i]?.ref ?? "-",
+    contractDate: (contractRows || [])[i]?.contractDate ?? "-",
+    payoutDate: (contractRows || [])[i]?.payoutDate ?? "-",
+    endDate: (contractRows || [])[i]?.endDate ?? "-",
     depositAmount: "100,000,000 원",
     allowanceAmount: "1,500,000 원",
-    contractState: contractRows[i].status,
-    accountVerify: contractRows[i].verify,
+    contractState: (contractRows || [])[i]?.status ?? "-",
+    accountVerify: (contractRows || [])[i]?.verify ?? "-",
     changeType: "계좌정보변경",
     beforeValue: "신한 110-123-****5678",
     afterValue: "신한 110-987-****4321",
-    requester: contractRows[i].name,
+    requester: (contractRows || [])[i]?.name ?? "-",
     status: i % 3 === 0 ? "승인대기" : i % 3 === 1 ? "승인완료" : "반려",
     memo: "",
     phone: `010-12${String(30 + i).padStart(2, "0")}-56${String(70 + i).padStart(2, "0")}`,
     accountNo: `110-987-****${String(4321 + i).padStart(4, "0")}`,
     fieldChanges: [
       { field: "계약번호", before: `LASM-202405${String(20 - i).padStart(2, "0")}-${String(i + 1).padStart(3, "0")}`, after: `LASM-202405${String(20 - i).padStart(2, "0")}-${String(i + 1).padStart(3, "0")}` },
-      { field: "계약자명", before: contractRows[i].name, after: contractRows[i].name },
-      { field: "추천인명", before: contractRows[i].ref, after: contractRows[i].ref },
+      { field: "계약자명", before: (contractRows || [])[i]?.name ?? "-", after: (contractRows || [])[i]?.name ?? "-" },
+      { field: "추천인명", before: (contractRows || [])[i]?.ref ?? "-", after: (contractRows || [])[i]?.ref ?? "-" },
       { field: "계약종류", before: "LAS점장점주", after: "LAS점장점주" },
-      { field: "계약일자", before: contractRows[i].contractDate, after: contractRows[i].contractDate },
-      { field: "수당지급일", before: contractRows[i].payoutDate, after: contractRows[i].payoutDate },
-      { field: "계약종료일", before: contractRows[i].endDate, after: contractRows[i].endDate },
+      { field: "계약일자", before: (contractRows || [])[i]?.contractDate ?? "-", after: (contractRows || [])[i]?.contractDate ?? "-" },
+      { field: "수당지급일", before: (contractRows || [])[i]?.payoutDate ?? "-", after: (contractRows || [])[i]?.payoutDate ?? "-" },
+      { field: "계약종료일", before: (contractRows || [])[i]?.endDate ?? "-", after: (contractRows || [])[i]?.endDate ?? "-" },
       { field: "보증금액", before: "100,000,000 원", after: "100,000,000 원" },
       { field: "수당", before: "1,500,000 원", after: "1,500,000 원" },
       { field: "근무여부", before: i % 2 === 0 ? "근무" : "미근무", after: i % 2 === 0 ? "근무" : "미근무" },
@@ -976,7 +1152,7 @@ function ChangePage() {
       { field: "주민번호", before: "900101-1234567", after: "900101-1234567" },
       { field: "은행명", before: "신한은행", after: "신한은행" },
       { field: "계좌번호", before: "110-123-456789", after: `110-987-${String(4321 + i).padStart(4, "0")}` },
-      { field: "예금주명", before: contractRows[i].name, after: contractRows[i].name }
+      { field: "예금주명", before: (contractRows || [])[i]?.name ?? "-", after: (contractRows || [])[i]?.name ?? "-" }
     ]
   }));
 
@@ -1285,18 +1461,59 @@ function SystemPage({
   onResetPassword: (id: number) => void;
 }) {
   const [newUser, setNewUser] = useState({ email: "", role: "운영자" });
-  const [contractTemplate, setContractTemplate] = useState({
-    name: "LAS점장점주 표준계약서",
-    version: "v1.0",
-    appliedFrom: "2024-05-20",
-    condition: "계약일 기준 3년, 수당지급일은 계약일+2개월 적용"
-  });
-  const [allowanceRules, setAllowanceRules] = useState([
-    { id: 1, deposit: "10,000,000", workAmount: "1,200,000", nonWorkAmount: "900,000" },
-    { id: 2, deposit: "20,000,000", workAmount: "1,300,000", nonWorkAmount: "950,000" },
-    { id: 3, deposit: "30,000,000", workAmount: "1,400,000", nonWorkAmount: "1,000,000" },
-    { id: 4, deposit: "60,000,000", workAmount: "1,500,000", nonWorkAmount: "1,100,000" }
-  ]);
+
+  // 계약서 관리
+  const [contractTypes, setContractTypes] = useState<ContractTypeRow[]>([]);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<ContractTypeRow | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editYears, setEditYears] = useState(3);
+  const [editMonths, setEditMonths] = useState(2);
+  const [editRules, setEditRules] = useState<ContractTypeRule[]>([]);
+  const [ctSaving, setCtSaving] = useState(false);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/contract-types`).then((r) => r.json()).then((d) => {
+      setContractTypes(Array.isArray(d.rows) ? d.rows : []);
+    }).catch(() => {});
+  }, []);
+
+  const openNew = () => {
+    setEditTarget(null);
+    setEditName(""); setEditYears(3); setEditMonths(2);
+    setEditRules([{ id: Date.now(), deposit: 0, workAmount4: 0, workAmount2: 0, nonWorkAmount: 0 }]);
+    setEditOpen(true);
+  };
+
+  const openEdit = (ct: ContractTypeRow) => {
+    setEditTarget(ct);
+    setEditName(ct.name); setEditYears(ct.contractYears); setEditMonths(ct.payoutMonths);
+    setEditRules(ct.rules.map((r) => ({ ...r })));
+    setEditOpen(true);
+  };
+
+  const saveType = async () => {
+    if (!editName.trim()) return;
+    setCtSaving(true);
+    const body = { name: editName.trim(), contractYears: editYears, payoutMonths: editMonths, rules: editRules };
+    try {
+      if (editTarget) {
+        await fetch(`${API_BASE}/contract-types/${editTarget.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        setContractTypes((prev) => prev.map((x) => x.id === editTarget.id ? { ...x, ...body } : x));
+      } else {
+        const res = await fetch(`${API_BASE}/contract-types`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const data = await res.json();
+        setContractTypes((prev) => [...prev, { id: data.id, ...body }]);
+      }
+      setEditOpen(false);
+    } finally { setCtSaving(false); }
+  };
+
+  const deleteType = async (id: number) => {
+    if (!window.confirm("계약서를 삭제하시겠습니까?")) return;
+    await fetch(`${API_BASE}/contract-types/${id}`, { method: "DELETE" });
+    setContractTypes((prev) => prev.filter((x) => x.id !== id));
+  };
 
   const addUser = () => {
     if (!newUser.email.trim()) return;
@@ -1320,15 +1537,12 @@ function SystemPage({
           <tbody>
             {users.map((u) => (
               <tr key={u.id}>
-                <td>{u.email}</td>
-                <td>{u.role}</td>
+                <td>{u.email}</td><td>{u.role}</td>
                 <td><span className={`badge ${u.state === "활성" ? "green" : "red"}`}>{u.state}</span></td>
-                <td>
-                  <div className="system-user-btns">
-                    <button className="line-btn" onClick={() => setUsers((prev) => prev.map((x) => x.id === u.id ? ({ ...x, state: x.state === "활성" ? "비활성" : "활성" }) : x))}>{u.state === "활성" ? "비활성" : "활성"} 전환</button>
-                    <button className="line-btn" onClick={() => onResetPassword(u.id)}>비번초기화</button>
-                  </div>
-                </td>
+                <td><div className="system-user-btns">
+                  <button className="line-btn" onClick={() => setUsers((prev) => prev.map((x) => x.id === u.id ? ({ ...x, state: x.state === "활성" ? "비활성" : "활성" }) : x))}>{u.state === "활성" ? "비활성" : "활성"} 전환</button>
+                  <button className="line-btn" onClick={() => onResetPassword(u.id)}>비번초기화</button>
+                </div></td>
               </tr>
             ))}
           </tbody>
@@ -1336,61 +1550,93 @@ function SystemPage({
       </section>
 
       <section className="card">
-        <div className="card-title-sm">계약서 관리</div>
-        <div className="contract-info-row three">
-          <label className="field"><span>계약서명</span><input className="input-input" value={contractTemplate.name} onChange={(e) => setContractTemplate((p) => ({ ...p, name: e.target.value }))} /></label>
-          <label className="field"><span>버전</span><input className="input-input" value={contractTemplate.version} onChange={(e) => setContractTemplate((p) => ({ ...p, version: e.target.value }))} /></label>
-          <label className="field"><span>적용시작일</span><input className="input-input" type="date" value={contractTemplate.appliedFrom} onChange={(e) => setContractTemplate((p) => ({ ...p, appliedFrom: e.target.value }))} /></label>
+        <div className="ct-manage-header">
+          <div className="card-title-sm">계약서 관리</div>
+          <button className="primary-btn" onClick={openNew}><Plus size={15} /> 계약서 등록</button>
         </div>
-        <div className="card-title-sm allowance-title">기준수당</div>
-        <table className="grid allowance-rule-grid">
-          <thead><tr><th>보증금</th><th>근무수당</th><th>미근무수당</th><th></th></tr></thead>
+        <table className="grid ct-list-grid">
+          <thead><tr><th>계약서명</th><th>계약기간</th><th>수당지급 기준</th><th>수당 조건 수</th><th>관리</th></tr></thead>
           <tbody>
-            {allowanceRules.map((rule) => (
-              <tr key={rule.id}>
-                <td><input className="input-input" value={rule.deposit} onChange={(e) => setAllowanceRules((prev) => prev.map((x) => x.id === rule.id ? ({ ...x, deposit: e.target.value }) : x))} /></td>
-                <td><input className="input-input" value={rule.workAmount} onChange={(e) => setAllowanceRules((prev) => prev.map((x) => x.id === rule.id ? ({ ...x, workAmount: e.target.value }) : x))} /></td>
-                <td><input className="input-input" value={rule.nonWorkAmount} onChange={(e) => setAllowanceRules((prev) => prev.map((x) => x.id === rule.id ? ({ ...x, nonWorkAmount: e.target.value }) : x))} /></td>
-                <td><button className="line-btn rule-delete-btn" onClick={() => setAllowanceRules((prev) => prev.filter((x) => x.id !== rule.id))}><Trash2 size={18} /></button></td>
-              </tr>
-            ))}
+            {contractTypes.length === 0
+              ? <tr><td colSpan={5}>등록된 계약서가 없습니다. 계약서 등록 버튼을 눌러 추가하세요.</td></tr>
+              : contractTypes.map((ct) => (
+                <tr key={ct.id}>
+                  <td>{ct.name}</td>
+                  <td>{ct.contractYears}년</td>
+                  <td>계약일 +{ct.payoutMonths}개월</td>
+                  <td>{ct.rules.length}개 구간</td>
+                  <td><div className="ct-icon-btns">
+                    <button className="icon-btn" title="편집" onClick={() => openEdit(ct)}><Pencil size={15} /></button>
+                    <button className="icon-btn" title="삭제" onClick={() => deleteType(ct.id)}><Trash2 size={15} /></button>
+                  </div></td>
+                </tr>
+              ))}
           </tbody>
         </table>
-        <div className="actions">
-          <button className="line-btn" onClick={() => setAllowanceRules((prev) => [...prev, { id: Date.now(), deposit: "0", workAmount: "0", nonWorkAmount: "0" }])}>조건 추가</button>
-          <button className="primary-btn">조건저장</button>
-        </div>
-        <label className="field"><span>계약서 원본 PDF 파일 등록</span><div className="dropzone">PDF 파일 업로드 영역</div></label>
-        <label className="field"><span>계약서 내용 / 조건 등록</span><textarea className="input-input" style={{ minHeight: 96 }} value={contractTemplate.condition} onChange={(e) => setContractTemplate((p) => ({ ...p, condition: e.target.value }))} /></label>
       </section>
+
+      {editOpen && (
+        <div className="modal-backdrop" onClick={() => setEditOpen(false)}>
+          <section className="modal-card ct-edit-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="card-title-sm">{editTarget ? "계약서 편집" : "계약서 신규 등록"}</div>
+            <div className="contract-info-row three" style={{ marginBottom: 12 }}>
+              <label className="field"><span>계약서명</span><input className="input-input" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="예: LAS점장점주" /></label>
+              <label className="field"><span>계약기간(년)</span><input className="input-input" type="number" min={1} max={10} value={editYears} onChange={(e) => setEditYears(Number(e.target.value))} /></label>
+              <label className="field"><span>수당지급일 기준(계약일+N개월)</span><input className="input-input" type="number" min={0} max={24} value={editMonths} onChange={(e) => setEditMonths(Number(e.target.value))} /></label>
+            </div>
+            <div className="ct-manage-header allowance-title">
+              <div className="card-title-sm" style={{ margin: 0 }}>보증금별 수당 조건</div>
+              <button className="primary-btn" onClick={() => setEditRules((prev) => [...prev, { id: Date.now(), deposit: 0, workAmount4: 0, workAmount2: 0, nonWorkAmount: 0 }])}><Plus size={14} /> 조건추가</button>
+            </div>
+            <table className="grid allowance-rule-grid">
+              <thead><tr><th>보증금(원)</th><th>근무수당(4일)(원)</th><th>근무수당(2일)(원)</th><th>미근무(원)</th><th></th></tr></thead>
+              <tbody>
+                {editRules.map((rule, idx) => (
+                  <tr key={rule.id}>
+                    <td><input className="input-input" value={rule.deposit.toLocaleString("ko-KR")} onChange={(e) => { const n = Number(e.target.value.replace(/[^\d]/g, "")); setEditRules((prev) => prev.map((x, i) => i === idx ? ({ ...x, deposit: n }) : x)); }} /></td>
+                    <td><input className="input-input" value={(rule.workAmount4 ?? 0).toLocaleString("ko-KR")} onChange={(e) => { const n = Number(e.target.value.replace(/[^\d]/g, "")); setEditRules((prev) => prev.map((x, i) => i === idx ? ({ ...x, workAmount4: n }) : x)); }} /></td>
+                    <td><input className="input-input" value={(rule.workAmount2 ?? 0).toLocaleString("ko-KR")} onChange={(e) => { const n = Number(e.target.value.replace(/[^\d]/g, "")); setEditRules((prev) => prev.map((x, i) => i === idx ? ({ ...x, workAmount2: n }) : x)); }} /></td>
+                    <td><input className="input-input" value={rule.nonWorkAmount.toLocaleString("ko-KR")} onChange={(e) => { const n = Number(e.target.value.replace(/[^\d]/g, "")); setEditRules((prev) => prev.map((x, i) => i === idx ? ({ ...x, nonWorkAmount: n }) : x)); }} /></td>
+                    <td><button className="icon-btn" onClick={() => setEditRules((prev) => prev.filter((_, i) => i !== idx))}><Trash2 size={15} /></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="actions modal-actions">
+              <button className="line-btn" onClick={() => setEditOpen(false)}>취소</button>
+              <button className="primary-btn" onClick={saveType} disabled={ctSaving}>{ctSaving ? "저장중..." : "저장"}</button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
 
-function ContractDetail({ onBack }: { onBack: () => void }) {
+function ContractDetail({ row, onBack }: { row: ContractRowData | null; onBack: () => void }) {
   const [tab, setTab] = useState<DetailTab>("basic");
   const [changeOpen, setChangeOpen] = useState(false);
   const [changeMemo, setChangeMemo] = useState("");
   const [changeHistoryRows, setChangeHistoryRows] = useState<Array<{ at: string; before: string; after: string; reason: string; changedFields: Array<{ field: string; before: string; after: string }> }>>([]);
   const [historyDetailOpen, setHistoryDetailOpen] = useState(false);
   const [selectedHistory, setSelectedHistory] = useState<null | { at: string; before: string; after: string; reason: string; changedFields: Array<{ field: string; before: string; after: string }> }>(null);
-  const [changeFields, setChangeFields] = useState([
-    { field: "계약번호", before: "LASM-20240520-001", after: "LASM-20240520-001", readOnlyAfter: true },
-    { field: "계약자명", before: "김영수", after: "김영수" },
-    { field: "추천인명", before: "이철수", after: "이철수" },
-    { field: "계약종류", before: "LAS점장점주", after: "LAS점장점주", readOnlyAfter: true },
-    { field: "계약일자", before: "2024-05-20", after: "2024-05-20" },
-    { field: "수당지급일", before: "2024-07-20", after: "2024-07-20" },
-    { field: "계약종료일", before: "2027-05-20", after: "2027-05-20" },
-    { field: "보증금액", before: "100,000,000 원", after: "100,000,000 원" },
-    { field: "수당", before: "1,500,000 원", after: "1,500,000 원" },
-    { field: "근무여부", before: "근무", after: "근무" },
-    { field: "주소", before: "서울시 강남구 테헤란로 100", after: "서울시 강남구 테헤란로 100" },
-    { field: "연락처", before: "010-1230-5670", after: "010-1230-5670" },
-    { field: "주민번호", before: "900101-1234567", after: "900101-1234567" },
-    { field: "은행명", before: "신한은행", after: "신한은행" },
-    { field: "계좌번호", before: "110-123-456789", after: "110-123-456789" },
-    { field: "예금주명", before: "김영수", after: "김영수" }
+  const [changeFields, setChangeFields] = useState(() => [
+    { field: "계약번호", before: row?.no ?? "-", after: row?.no ?? "-", readOnlyAfter: true },
+    { field: "계약자명", before: row?.name ?? "-", after: row?.name ?? "-" },
+    { field: "추천인명", before: row?.ref || "-", after: row?.ref || "-" },
+    { field: "계약종류", before: row?.type ?? "-", after: row?.type ?? "-", readOnlyAfter: true },
+    { field: "계약일자", before: row?.contractDate ?? "", after: row?.contractDate ?? "" },
+    { field: "수당지급일", before: row?.payoutDate ?? "", after: row?.payoutDate ?? "" },
+    { field: "계약종료일", before: row?.endDate ?? "", after: row?.endDate ?? "" },
+    { field: "보증금액", before: row?.depositAmount || "-", after: row?.depositAmount || "-" },
+    { field: "수당", before: row?.allowanceAmount || "-", after: row?.allowanceAmount || "-" },
+    { field: "근무여부", before: "-", after: "-" },
+    { field: "주소", before: "-", after: "-" },
+    { field: "연락처", before: row?.phone || "-", after: row?.phone || "-" },
+    { field: "주민번호", before: "-", after: "-" },
+    { field: "은행명", before: "-", after: "-" },
+    { field: "계좌번호", before: "-", after: "-" },
+    { field: "예금주명", before: "-", after: "-" }
   ]);
 
   const saveChangeRequest = () => {
@@ -1405,8 +1651,8 @@ function ContractDetail({ onBack }: { onBack: () => void }) {
   };
 
   const tabs: { key: DetailTab; label: string }[] = [{ key: "basic", label: "기본정보" }, { key: "document", label: "계약서/입금표" }, { key: "allowance", label: "수당정보" }, { key: "account", label: "계좌정보" }, { key: "history", label: "변경이력" }, { key: "memo", label: "메모" }];
-  const tabContent = tab === "basic" ? <DetailBasicTab /> : tab === "document" ? <DetailDocumentTab /> : tab === "allowance" ? <DetailAllowanceTab /> : tab === "account" ? <DetailAccountTab /> : tab === "history" ? <DetailHistoryTab rows={changeHistoryRows} onOpenDetail={(row) => { setSelectedHistory(row); setHistoryDetailOpen(true); }} /> : <DetailMemoTab />;
-  return <div><div className="head-with-btn"><PageHeader title="계약 상세" desc="계약 정보를 확인하고 관리하세요." /><div className="actions"><button className="line-btn" onClick={() => setChangeOpen(true)}>변경관리</button><button className="line-btn" onClick={onBack}>목록으로</button></div></div><section className="card summary-row"><div><div className="meta-label">계약번호</div><div className="meta-value">LASM-20240520-001</div></div><div><div className="meta-label">계약자</div><div className="meta-value">김영수</div></div><div><div className="meta-label">계약상태</div><div className="meta-value"><span className="badge green">정상운영</span></div></div><div><div className="meta-label">계약일자</div><div className="meta-value">2024-05-20</div></div><div><div className="meta-label">계약종료일</div><div className="meta-value">2027-05-20</div></div></section><div className="tabs">{tabs.map((t) => <button key={t.key} className={tab === t.key ? "tab active" : "tab"} onClick={() => setTab(t.key)}>{t.label}</button>)}</div>{tabContent}
+  const tabContent = tab === "basic" ? <DetailBasicTab row={row} /> : tab === "document" ? <DetailDocumentTab row={row} /> : tab === "allowance" ? <DetailAllowanceTab /> : tab === "account" ? <DetailAccountTab /> : tab === "history" ? <DetailHistoryTab rows={changeHistoryRows} onOpenDetail={(r) => { setSelectedHistory(r); setHistoryDetailOpen(true); }} /> : <DetailMemoTab />;
+  return <div><div className="head-with-btn"><PageHeader title="계약 상세" desc="계약 정보를 확인하고 관리하세요." /><div className="actions"><button className="line-btn" onClick={() => setChangeOpen(true)}>변경관리</button><button className="line-btn" onClick={onBack}>목록으로</button></div></div><section className="card summary-row"><div><div className="meta-label">계약번호</div><div className="meta-value">{row?.no ?? "-"}</div></div><div><div className="meta-label">계약자</div><div className="meta-value">{row?.name ?? "-"}</div></div><div><div className="meta-label">계약상태</div><div className="meta-value"><span className="badge green">{row?.status ?? "정상운영"}</span></div></div><div><div className="meta-label">계약일자</div><div className="meta-value">{row?.contractDate ?? "-"}</div></div><div><div className="meta-label">계약종료일</div><div className="meta-value">{row?.endDate ?? "-"}</div></div></section><div className="tabs">{tabs.map((t) => <button key={t.key} className={tab === t.key ? "tab active" : "tab"} onClick={() => setTab(t.key)}>{t.label}</button>)}</div>{tabContent}
   {changeOpen && (
     <div className="modal-backdrop" onClick={() => setChangeOpen(false)}>
       <section className="modal-card" onClick={(e) => e.stopPropagation()}>
@@ -1492,6 +1738,18 @@ export function App() {
   const [authUser, setAuthUser] = useState<UserAccount | null>(null);
   const [menu, setMenu] = useState<MenuKey>("dashboard");
   const [contractView, setContractView] = useState<ContractView>("list");
+  const [selectedContractRow, setSelectedContractRow] = useState<ContractRowData | null>(null);
+
+  const [rows, setRows] = useState<ContractRowData[]>([]);
+  useEffect(() => {
+    fetch('https://asia-northeast3-contractmanager-32072.cloudfunctions.net/api/contracts')
+      .then(res => res.json())
+      .then(resData => {
+        setRows(Array.isArray(resData.rows) ? resData.rows : []);
+      })
+      .catch(() => {});
+  }, []);
+
 
   const addUserWithTempPassword = (email: string, role: "시스템관리자" | "운영자") => {
     const nextId = users.length ? Math.max(...users.map((u) => u.id)) + 1 : 1;
@@ -1525,18 +1783,21 @@ export function App() {
     setLoginError("");
   };
 
+  const goDetail = (row: ContractRowData) => { setSelectedContractRow(row); setContractView("detail"); setMenu("contracts"); };
+
   const content = useMemo(() => {
-    if (menu === "dashboard") return <DashboardPage onDetail={() => { setMenu("contracts"); setContractView("detail"); }} />;
+    if (menu === "dashboard") return <DashboardPage onDetail={goDetail} rows={rows} />;
     if (menu === "contracts") {
       if (contractView === "create") return <ContractCreate onBack={() => setContractView("list")} />;
-      if (contractView === "detail") return <ContractDetail onBack={() => setContractView("list")} />;
-      return <ContractList onCreate={() => setContractView("create")} onDetail={() => setContractView("detail")} />;
+      if (contractView === "detail") return <ContractDetail row={selectedContractRow} onBack={() => setContractView("list")} />;
+      return <ContractList onCreate={() => setContractView("create")} onDetail={goDetail} rows={rows} />;
     }
     if (menu === "referrers") return <ReferrerPage />;
-    if (menu === "allowances") return <AllowancePage />;
-    if (menu === "account") return <AccountPage />;
+    if (menu === "allowances") return <AllowancePage rows={rows} />;
+    if (menu === "account") return <AccountPage rows={rows} />;
     return <SystemPage users={users} setUsers={setUsers} onAddUserWithTempPassword={addUserWithTempPassword} onResetPassword={resetPassword} />;
-  }, [menu, contractView, users]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menu, contractView, users, rows, selectedContractRow]);
 
   if (!authUser) {
     return (

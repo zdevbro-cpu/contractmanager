@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "contractmanager-32072"
+  },
+  "targets": {
+    "contractmanager-32072": {
+      "hosting": {
+        "web": [
+          "contractmanager"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}
