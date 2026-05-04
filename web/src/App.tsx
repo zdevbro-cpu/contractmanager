@@ -38,6 +38,8 @@ type ContractRowData = {
   phone?: string;
   status: string;
   verify: string;
+  accountHolder?: string;
+  residentRegistrationNumber?: string;
 };
 
 type MenuKey = "dashboard" | "contracts" | "referrers" | "allowances" | "account" | "system";
@@ -458,7 +460,7 @@ function DetailBasicTab({ row }: { row: ContractRowData | null }) {
         <tr><th>계약번호</th><td>{row?.no ?? "-"}</td><th>계약일</th><td>{row?.contractDate ?? "-"}</td></tr>
         <tr><th>계약종류</th><td>{row?.type ?? "-"}</td><th>계약종료일</th><td>{row?.endDate ?? "-"}</td></tr>
         <tr><th>계약자명</th><td>{row?.name ?? "-"}</td><th>보증금액</th><td>{row?.depositAmount || "-"}</td></tr>
-        <tr><th>주민번호</th><td>-</td><th>첫수당지급일</th><td>{row?.payoutDate ?? "-"}</td></tr>
+        <tr><th>주민번호</th><td>{row?.residentRegistrationNumber || "-"}</td><th>첫수당지급일</th><td>{row?.payoutDate ?? "-"}</td></tr>
         <tr><th>연락처</th><td>{row?.phone || "-"}</td><th>계약상태</th><td>{row?.status ?? "정상운영"}</td></tr>
       </tbody></table>
     </section>
@@ -468,32 +470,41 @@ function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
   const pdfLabel = row ? `${row.type}_${row.contractDate}_${row.name}.pdf` : "";
   return (
     <section className="card">
-      <div className="card-title-sm">계약서/입금표</div>
-      <div className="two-col">
-        <div className="card">
-          <div className="card-title-sm">계약서 PDF</div>
-          <div className="pdf-filename">{pdfLabel || "파일 미등록"}</div>
-          <div className="pdf-empty-box">파일이 등록되지 않았습니다</div>
-          <div className="actions detail-file-actions">
-            <button className="primary-btn" disabled style={{ opacity: 0.45 }}>계약서 보기</button>
-            <button className="line-btn">파일 등록</button>
+      <div className="card-title-sm">계약서 (입금표/신분증 포함)</div>
+      <div className="card">
+        <div className="pdf-filename">{pdfLabel || "파일 미등록"}</div>
+        {!pdfLabel ? (
+          <div className="pdf-empty-box">등록된 계약서 파일이 없습니다.</div>
+        ) : (
+          <div className="pdf-preview-placeholder">
+            <FileText size={48} strokeWidth={1} />
+            <p>PDF 파일을 확인하려면 아래 버튼을 클릭하세요.</p>
           </div>
-        </div>
-        <div className="card">
-          <div className="card-title-sm">입금표 PDF</div>
-          <div className="pdf-filename">파일 미등록</div>
-          <div className="pdf-empty-box">파일이 등록되지 않았습니다</div>
-          <div className="actions detail-file-actions">
-            <button className="primary-btn" disabled style={{ opacity: 0.45 }}>입금표 보기</button>
-            <button className="line-btn">파일 등록</button>
-          </div>
+        )}
+        <div className="actions detail-file-actions">
+          <button className="primary-btn" onClick={() => alert("준비 중인 기능입니다. (파일 서버 연결 필요)")}>계약서 보기</button>
+          <button className="line-btn">파일 업로드/변경</button>
         </div>
       </div>
     </section>
   );
 }
 function DetailAllowanceTab() { return <section className="card"><div className="card-title-sm">수당정보</div><table className="grid"><thead><tr><th>기준월</th><th>산정수당</th><th>공제</th><th>실지급예정금액</th><th>지급상태</th></tr></thead><tbody><tr><td colSpan={5}>수당 정보가 없습니다.</td></tr></tbody></table></section>; }
-function DetailAccountTab() { return <section className="card"><div className="card-title-sm">현재 계좌 정보</div><table className="grid"><tbody><tr><th>은행명</th><td>신한은행</td></tr><tr><th>계좌번호</th><td>110-123-456789</td></tr><tr><th>예금주명</th><td>김영수</td></tr><tr><th>계좌실명조회 상태</th><td><span className="badge green">실명조회 일치</span></td></tr></tbody></table></section>; }
+function DetailAccountTab({ row }: { row: ContractRowData | null }) {
+  return (
+    <section className="card">
+      <div className="card-title-sm">현재 계좌 정보</div>
+      <table className="grid">
+        <tbody>
+          <tr><th>은행명</th><td>{row?.bankName || "-"}</td></tr>
+          <tr><th>계좌번호</th><td>{row?.accountNo || "-"}</td></tr>
+          <tr><th>예금주명</th><td>{row?.accountHolder || "-"}</td></tr>
+          <tr><th>계좌실명조회 상태</th><td><span className={`badge ${row?.verify === "검증완료" ? "green" : "red"}`}>{row?.verify || "미검증"}</span></td></tr>
+        </tbody>
+      </table>
+    </section>
+  );
+}
 function DetailHistoryTab({
   rows,
   onOpenDetail
@@ -514,6 +525,8 @@ function ReferrerPage() {
   const [editingReferrer, setEditingReferrer] = useState<ReferrerRow | null>(null);
   const [modalForm, setModalForm] = useState({ name: "", org: "", phone: "", title: "", email: "", remarks: "" });
   const [referrerForm, setReferrerForm] = useState({ name: "", org: "", phone: "", title: "", email: "", remarks: "" });
+  const [isNewOrg, setIsNewOrg] = useState(false);
+  const [isModalNewOrg, setIsModalNewOrg] = useState(false);
 
   const [fName, setFName] = useState("");
   const [fOrg, setFOrg] = useState("");
@@ -526,6 +539,13 @@ function ReferrerPage() {
     fetch(`${API_BASE}/referrers`)
       .then(res => res.json())
       .then(data => setReferrerRows(Array.isArray(data.rows) ? data.rows : []))
+      .catch(() => {});
+  };
+
+  const deleteReferrer = (id: number) => {
+    if (!confirm("정말 삭제하시겠습니까?")) return;
+    fetch(`${API_BASE}/referrers/${id}`, { method: "DELETE" })
+      .then(() => fetchReferrers())
       .catch(() => {});
   };
 
@@ -552,6 +572,7 @@ function ReferrerPage() {
       email: row.email || "", 
       remarks: row.remarks || "" 
     });
+    setIsModalNewOrg(false);
   };
 
   const saveReferrerDetail = () => {
@@ -583,7 +604,7 @@ function ReferrerPage() {
         email: referrerForm.email.trim(),
         remarks: referrerForm.remarks.trim()
       })
-    }).then(() => { fetchReferrers(); setReferrerForm({ name: "", org: "", phone: "", title: "", email: "", remarks: "" }); }).catch(() => {});
+    }).then(() => { fetchReferrers(); setReferrerForm({ name: "", org: "", phone: "", title: "", email: "", remarks: "" }); setIsNewOrg(false); }).catch(() => {});
   };
 
   const handleResetFilters = () => {
@@ -640,13 +661,19 @@ function ReferrerPage() {
         <div>
           <div className="referrer-table-scroll">
             <table className="grid referrer-grid">
-              <thead><tr><th>소속</th><th>이름</th><th>전화번호</th><th>이메일</th><th>직급</th></tr></thead>
+              <thead><tr><th>소속</th><th>이름</th><th>전화번호</th><th>이메일</th><th>직급</th><th className="text-center">관리</th></tr></thead>
               <tbody>
                 {filteredReferrers.length === 0
-                  ? <tr><td colSpan={5} style={{ textAlign: "center", color: "#8a97ac", padding: "24px" }}>등록된 추천인이 없습니다.</td></tr>
+                  ? <tr><td colSpan={6} style={{ textAlign: "center", color: "#8a97ac", padding: "24px" }}>등록된 추천인이 없습니다.</td></tr>
                   : filteredReferrers.map((row) => (
                     <tr key={row.id}>
-                      <td>{row.org}</td><td>{row.name}</td><td>{row.phone}</td><td>{row.email || "-"}</td><td>{row.title}</td>
+                      <td>{row.org}</td><td>{row.name}</td><td>{formatPhoneNumber(row.phone)}</td><td>{row.email || "-"}</td><td>{row.title}</td>
+                      <td className="text-center">
+                        <div style={{ display: "flex", gap: "8px", justifyContent: "center" }}>
+                          <button className="icon-btn" onClick={() => openReferrerDetail(row)} title="상세"><Eye size={14} /></button>
+                          <button className="icon-btn text-red" onClick={() => deleteReferrer(row.id)} title="삭제"><Trash2 size={14} /></button>
+                        </div>
+                      </td>
                     </tr>
                   ))
                 }
@@ -657,28 +684,57 @@ function ReferrerPage() {
         <div>
           <div className="card-title-sm">추천인 등록</div>
           <div className="side-form">
-            <label className="field"><span>소속<b className="req"> *</b></span><input className="input-input" placeholder="소속 입력" value={referrerForm.org} onChange={(e) => setReferrerForm((prev) => ({ ...prev, org: e.target.value }))} /></label>
+            <label className="field"><span>소속<b className="req"> *</b></span>
+              {!isNewOrg ? (
+                <select className="input-input" value={referrerForm.org} onChange={(e) => {
+                  if (e.target.value === "__new__") { setIsNewOrg(true); setReferrerForm(p => ({ ...p, org: "" })); }
+                  else { setReferrerForm(p => ({ ...p, org: e.target.value })); }
+                }}>
+                  <option value="">소속 선택</option>
+                  {uniqueOrgs.map(org => <option key={org} value={org}>{org}</option>)}
+                  <option value="__new__">[직접 입력]</option>
+                </select>
+              ) : (
+                <div style={{ display: "flex", gap: "4px" }}>
+                  <input className="input-input" placeholder="신규 소속 입력" value={referrerForm.org} onChange={(e) => setReferrerForm(p => ({ ...p, org: e.target.value }))} />
+                  <button className="line-btn" style={{ padding: "0 8px", minWidth: "auto" }} onClick={() => setIsNewOrg(false)}>취소</button>
+                </div>
+              )}
+            </label>
             <label className="field"><span>이름<b className="req"> *</b></span><input className="input-input" placeholder="이름 입력" value={referrerForm.name} onChange={(e) => setReferrerForm((prev) => ({ ...prev, name: e.target.value }))} /></label>
             <label className="field"><span>전화번호<b className="req"> *</b></span><input className="input-input" placeholder="010-0000-0000" inputMode="numeric" value={referrerForm.phone} onChange={(e) => setReferrerForm((prev) => ({ ...prev, phone: formatPhoneNumber(e.target.value) }))} /></label>
             <label className="field"><span>이메일</span><input className="input-input" placeholder="example@email.com" value={referrerForm.email} onChange={(e) => setReferrerForm((prev) => ({ ...prev, email: e.target.value }))} /></label>
             <label className="field"><span>직급</span><input className="input-input" placeholder="직급 입력" value={referrerForm.title} onChange={(e) => setReferrerForm((prev) => ({ ...prev, title: e.target.value }))} /></label>
-            <label className="field"><span>비고</span><input className="input-input" placeholder="비고 입력" value={referrerForm.remarks} onChange={(e) => setReferrerForm((prev) => ({ ...prev, remarks: e.target.value }))} /></label>
           </div>
-          <div className="actions referrer-actions"><button className="line-btn" onClick={() => setReferrerForm({ name: "", org: "", phone: "", title: "", email: "", remarks: "" })}>취소</button><button className="primary-btn" onClick={saveReferrerForm}>저장</button></div>
+          <div className="actions referrer-actions"><button className="line-btn" onClick={() => { setReferrerForm({ name: "", org: "", phone: "", title: "", email: "", remarks: "" }); setIsNewOrg(false); }}>취소</button><button className="primary-btn" onClick={saveReferrerForm}>저장</button></div>
         </div>
       </section>
 
       {editingReferrer && (
         <div className="modal-backdrop" onClick={() => setEditingReferrer(null)}>
           <section className="modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="card-title-sm">추천인 정보 상세</div>
+            <div className="card-title-sm">추천인 정보 수정</div>
             <div className="side-form">
+              <label className="field"><span>소속<b className="req"> *</b></span>
+                {!isModalNewOrg ? (
+                  <select className="input-input" value={modalForm.org} onChange={(e) => {
+                    if (e.target.value === "__new__") { setIsModalNewOrg(true); setModalForm(p => ({ ...p, org: "" })); }
+                    else { setModalForm(p => ({ ...p, org: e.target.value })); }
+                  }}>
+                    {uniqueOrgs.map(org => <option key={org} value={org}>{org}</option>)}
+                    <option value="__new__">[직접 입력]</option>
+                  </select>
+                ) : (
+                  <div style={{ display: "flex", gap: "4px" }}>
+                    <input className="input-input" value={modalForm.org} onChange={(e) => setModalForm(p => ({ ...p, org: e.target.value }))} />
+                    <button className="line-btn" style={{ padding: "0 8px", minWidth: "auto" }} onClick={() => setIsModalNewOrg(false)}>취소</button>
+                  </div>
+                )}
+              </label>
               <label className="field"><span>이름<b className="req"> *</b></span><input className="input-input" value={modalForm.name} onChange={(e) => setModalForm((prev) => ({ ...prev, name: e.target.value }))} /></label>
-              <label className="field"><span>소속<b className="req"> *</b></span><input className="input-input" value={modalForm.org} onChange={(e) => setModalForm((prev) => ({ ...prev, org: e.target.value }))} /></label>
               <label className="field"><span>전화번호<b className="req"> *</b></span><input className="input-input" inputMode="numeric" value={modalForm.phone} onChange={(e) => setModalForm((prev) => ({ ...prev, phone: formatPhoneNumber(e.target.value) }))} /></label>
               <label className="field"><span>이메일</span><input className="input-input" value={modalForm.email} onChange={(e) => setModalForm((prev) => ({ ...prev, email: e.target.value }))} /></label>
               <label className="field"><span>직급</span><input className="input-input" value={modalForm.title} onChange={(e) => setModalForm((prev) => ({ ...prev, title: e.target.value }))} /></label>
-              <label className="field"><span>비고</span><input className="input-input" value={modalForm.remarks} onChange={(e) => setModalForm((prev) => ({ ...prev, remarks: e.target.value }))} /></label>
             </div>
             <div className="actions modal-actions">
               <button className="line-btn" onClick={() => setEditingReferrer(null)}>취소</button>
@@ -1699,13 +1755,12 @@ function ContractDetail({ row, onBack }: { row: ContractRowData | null; onBack: 
     { field: "계약종료일", before: row?.endDate ?? "", after: row?.endDate ?? "" },
     { field: "보증금액", before: row?.depositAmount || "-", after: row?.depositAmount || "-" },
     { field: "수당", before: row?.allowanceAmount || "-", after: row?.allowanceAmount || "-" },
-    { field: "근무여부", before: "-", after: "-" },
-    { field: "주소", before: "-", after: "-" },
+    { field: "근무여부", before: "근무", after: "근무" },
     { field: "연락처", before: row?.phone || "-", after: row?.phone || "-" },
-    { field: "주민번호", before: "-", after: "-" },
-    { field: "은행명", before: "-", after: "-" },
-    { field: "계좌번호", before: "-", after: "-" },
-    { field: "예금주명", before: "-", after: "-" }
+    { field: "주민번호", before: row?.residentRegistrationNumber || "-", after: row?.residentRegistrationNumber || "-" },
+    { field: "은행명", before: row?.bankName || "-", after: row?.bankName || "-" },
+    { field: "계좌번호", before: row?.accountNo || "-", after: row?.accountNo || "-" },
+    { field: "예금주명", before: row?.accountHolder || "-", after: row?.accountHolder || "-" }
   ]);
 
   const saveChangeRequest = () => {
@@ -1719,8 +1774,8 @@ function ContractDetail({ row, onBack }: { row: ContractRowData | null; onBack: 
     setTab("history");
   };
 
-  const tabs: { key: DetailTab; label: string }[] = [{ key: "basic", label: "기본정보" }, { key: "document", label: "계약서/입금표" }, { key: "allowance", label: "수당정보" }, { key: "account", label: "계좌정보" }, { key: "history", label: "변경이력" }, { key: "memo", label: "메모" }];
-  const tabContent = tab === "basic" ? <DetailBasicTab row={row} /> : tab === "document" ? <DetailDocumentTab row={row} /> : tab === "allowance" ? <DetailAllowanceTab /> : tab === "account" ? <DetailAccountTab /> : tab === "history" ? <DetailHistoryTab rows={changeHistoryRows} onOpenDetail={(r) => { setSelectedHistory(r); setHistoryDetailOpen(true); }} /> : <DetailMemoTab />;
+  const tabs: { key: DetailTab; label: string }[] = [{ key: "basic", label: "기본정보" }, { key: "document", label: "계약서" }, { key: "allowance", label: "수당정보" }, { key: "account", label: "계좌정보" }, { key: "history", label: "변경이력" }, { key: "memo", label: "메모" }];
+  const tabContent = tab === "basic" ? <DetailBasicTab row={row} /> : tab === "document" ? <DetailDocumentTab row={row} /> : tab === "allowance" ? <DetailAllowanceTab /> : tab === "account" ? <DetailAccountTab row={row} /> : tab === "history" ? <DetailHistoryTab rows={changeHistoryRows} onOpenDetail={(r) => { setSelectedHistory(r); setHistoryDetailOpen(true); }} /> : <DetailMemoTab />;
   return <div><div className="head-with-btn"><PageHeader title="계약 상세" desc="계약 정보를 확인하고 관리하세요." /><div className="actions"><button className="line-btn" onClick={() => setChangeOpen(true)}>변경관리</button><button className="line-btn" onClick={onBack}>목록으로</button></div></div><section className="card summary-row"><div><div className="meta-label">계약번호</div><div className="meta-value">{row?.no ?? "-"}</div></div><div><div className="meta-label">계약자</div><div className="meta-value">{row?.name ?? "-"}</div></div><div><div className="meta-label">계약상태</div><div className="meta-value"><span className="badge green">{row?.status ?? "정상운영"}</span></div></div><div><div className="meta-label">계약일자</div><div className="meta-value">{row?.contractDate ?? "-"}</div></div><div><div className="meta-label">계약종료일</div><div className="meta-value">{row?.endDate ?? "-"}</div></div></section><div className="tabs">{tabs.map((t) => <button key={t.key} className={tab === t.key ? "tab active" : "tab"} onClick={() => setTab(t.key)}>{t.label}</button>)}</div>{tabContent}
   {changeOpen && (
     <div className="modal-backdrop" onClick={() => setChangeOpen(false)}>

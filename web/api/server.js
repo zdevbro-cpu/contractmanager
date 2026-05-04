@@ -333,6 +333,16 @@ app.put("/api/referrers/:id", async (req, res) => {
   }
 });
 
+app.delete("/api/referrers/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query("delete from referrers where id = $1", [id]);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
+  }
+});
+
 app.get("/api/contract-types", async (_req, res) => {
   try {
     const result = await pool.query("select id, name, contract_years, payout_months, rules from contract_types order by id");

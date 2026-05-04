@@ -330,6 +330,17 @@ app.put("/referrers/:id", async (req, res) => {
   }
 });
 
+app.delete("/referrers/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    await ensureAppSchema();
+    await pool.query("delete from referrers where id = $1", [id]);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
+  }
+});
+
 app.get("/contract-types", async (_req, res) => {
   try {
     await ensureAppSchema();
