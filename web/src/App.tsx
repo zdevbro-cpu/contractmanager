@@ -738,11 +738,11 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
         <div className="allowance-period-filter">
           <label className="field">
             <span>시작일</span>
-            <input className="input-input" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); if (endDate < e.target.value) setEndDate(e.target.value); }} />
+            <input className="input-input" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setEndDate(e.target.value); setPage(1); }} />
           </label>
           <label className="field">
             <span>종료일</span>
-            <input className="input-input" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            <input className="input-input" type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setPage(1); }} />
           </label>
           <div className="field">
             <span>계약자명</span>
