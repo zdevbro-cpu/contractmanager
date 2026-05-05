@@ -974,7 +974,7 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
           </select>
           <input className="input-input" placeholder="계좌번호" value={accountNo} onChange={(e) => setAccountNo(e.target.value)} />
           <input className="input-input" placeholder="예금주" value={accountOwner} onChange={(e) => setAccountOwner(e.target.value)} />
-          <button className="primary-btn action-btn" onClick={downloadAccountVerification}>계좌실명확인</button>
+          <button className="primary-btn action-btn" onClick={downloadAccountVerification}>계좌확인생성</button>
         </div>
       </section>
 
