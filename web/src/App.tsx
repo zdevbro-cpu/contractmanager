@@ -3048,6 +3048,7 @@ export function App() {
               setMenu(m.key);
               if (m.key !== "contracts") setContractView("list");
               if (m.key !== "appointment") setAppointmentView("list");
+              if (["allowances", "salaries", "account", "changes"].includes(m.key)) loadContracts();
             }
           }}
         >
