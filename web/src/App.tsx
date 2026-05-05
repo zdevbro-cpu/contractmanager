@@ -96,7 +96,7 @@ function appointmentStatusClass(status: string) {
 
 function AppointmentListTable({ onDetail, rows, onStatusChange }: { onDetail: (row: ContractRowData) => void; rows: ContractRowData[]; onStatusChange: (id: number, status: string) => void }) {
   return (
-    <table className="grid contract-grid">
+    <table className="grid allowance-grid">
       <thead>
         <tr>
           <th className="center-th">계약자명</th>
@@ -679,7 +679,7 @@ function SalaryPage({ rows }: { rows: ContractRowData[] }) {
                 <td className="text-center">
                   <input
                     className="input-input"
-                    style={{ textAlign: "center", width: "100px", padding: "2px 6px", height: "26px" }}
+                    style={{ textAlign: "center", width: "100px", padding: "1px 6px", height: "20px", minHeight: "20px" }}
                     value={getActivity(r).toLocaleString("ko-KR")}
                     onChange={(e) => {
                       const n = Number(e.target.value.replace(/[^\d]/g, ""));
