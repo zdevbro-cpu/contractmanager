@@ -81,12 +81,16 @@ const menus: { key: MenuKey; label: string; icon: JSX.Element; indent?: boolean;
   { key: "system", label: "시스템관리", icon: <Settings size={18} /> }
 ];
 
-function AppointmentListTable({ onDetail, rows }: { onDetail: (row: ContractRowData) => void; rows: ContractRowData[] }) {
-  const compactStatus = (value: string) => {
-    if (value === "입금표 미등록") return "입금표미등록";
-    return value;
-  };
+const APPOINTMENT_STATUS_OPTIONS = ["정상운영", "일시정지", "계약해지", "계약만료"];
 
+function appointmentStatusClass(status: string) {
+  if (status === "정상운영") return "green";
+  if (status === "일시정지") return "orange";
+  if (status === "계약해지" || status === "계약만료") return "red";
+  return "";
+}
+
+function AppointmentListTable({ onDetail, rows, onStatusChange }: { onDetail: (row: ContractRowData) => void; rows: ContractRowData[]; onStatusChange: (id: number, status: string) => void }) {
   return (
     <table className="grid contract-grid">
       <thead>
@@ -99,7 +103,7 @@ function AppointmentListTable({ onDetail, rows }: { onDetail: (row: ContractRowD
           <th>계약종료일</th>
           <th>급여</th>
           <th>활동비</th>
-          <th className="center-th">지급상태</th>
+          <th className="center-th">계약상태</th>
           <th>상세</th>
         </tr>
       </thead>
@@ -114,7 +118,15 @@ function AppointmentListTable({ onDetail, rows }: { onDetail: (row: ContractRowD
             <td>{r.endDate}</td>
             <td>{r.depositAmount}</td>
             <td>{r.allowanceAmount}</td>
-            <td className="center-td"><span className={`status-fixed ${statusClass(r.status || "")}`}>{compactStatus(r.status || "")}</span></td>
+            <td className="center-td">
+              <select
+                className={`status-select status-${appointmentStatusClass(r.status || "정상운영")}`}
+                value={r.status || "정상운영"}
+                onChange={(e) => onStatusChange(r.id, e.target.value)}
+              >
+                {APPOINTMENT_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </td>
             <td><button className="icon-btn" onClick={() => onDetail(r)}><Eye size={14} /></button></td>
           </tr>
         ))}
@@ -123,7 +135,7 @@ function AppointmentListTable({ onDetail, rows }: { onDetail: (row: ContractRowD
   );
 }
 
-function AppointmentPage({ onCreate, onDetail, rows }: { onCreate: () => void; onDetail: (row: ContractRowData) => void; rows: ContractRowData[] }) {
+function AppointmentPage({ onCreate, onDetail, rows, onStatusChange }: { onCreate: () => void; onDetail: (row: ContractRowData) => void; rows: ContractRowData[]; onStatusChange: (id: number, status: string) => void }) {
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -172,7 +184,7 @@ function AppointmentPage({ onCreate, onDetail, rows }: { onCreate: () => void; o
       </section>
       <section className="card">
         <div className="card-title-sm">전체 {filtered.length.toLocaleString("ko-KR")}건</div>
-        <AppointmentListTable onDetail={onDetail} rows={paged} />
+        <AppointmentListTable onDetail={onDetail} rows={paged} onStatusChange={onStatusChange} />
         <div className="contract-pagination">
           <div className="pager">
             <button className="pager-btn" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={safePage === 1}>‹</button>
@@ -586,23 +598,22 @@ function SalaryPage({ rows }: { rows: ContractRowData[] }) {
         </div>
         <table className="grid allowance-grid">
           <thead>
-            <tr><th>급여일</th><th>계약자명</th><th>추천인</th><th>은행명</th><th>계좌번호</th><th>계약일자</th><th>계약종료일</th><th>급여(원)</th><th className="text-center">활동비(원)</th><th className="text-center">지급액(원)</th></tr>
+            <tr><th>급여일</th><th>계약자명</th><th>은행명</th><th>계좌번호</th><th>계약일자</th><th>계약종료일</th><th>급여(원)</th><th className="text-center">활동비(원)</th><th className="text-center">지급액(원)</th></tr>
           </thead>
           <tbody>
             {pagedRows.map((r) => (
               <tr key={r.no}>
                 <td>{r.baseDate || "-"}</td>
                 <td>{r.name || "-"}</td>
-                <td>{r.ref || "-"}</td>
                 <td>{r.bankName}</td>
                 <td>{r.accountMasked}</td>
                 <td>{r.contractDate || "-"}</td>
                 <td>{r.endDate || "-"}</td>
-                <td>{r.depositAmount || "-"}</td>
+                <td>{r.salary > 0 ? Math.round(r.salary / 12).toLocaleString("ko-KR") : "-"}</td>
                 <td className="text-center">
                   <input
                     className="input-input"
-                    style={{ textAlign: "center", width: "100px" }}
+                    style={{ textAlign: "center", width: "100px", padding: "2px 6px", height: "26px" }}
                     value={getActivity(r).toLocaleString("ko-KR")}
                     onChange={(e) => {
                       const n = Number(e.target.value.replace(/[^\d]/g, ""));
@@ -610,7 +621,7 @@ function SalaryPage({ rows }: { rows: ContractRowData[] }) {
                     }}
                   />
                 </td>
-                <td className="text-right">{amountText(paidAmount(r))}</td>
+                <td className="text-right">{paidAmount(r).toLocaleString("ko-KR")}</td>
               </tr>
             ))}
           </tbody>
@@ -2397,7 +2408,7 @@ function SystemPage({
   const [appointmentRules, setAppointmentRules] = useState<any[]>([]);
   const [ctSaving, setCtSaving] = useState(false);
 
-  const APPOINTMENT_POSITIONS = ["대리", "과장", "차장", "부장", "이사"];
+  const APPOINTMENT_POSITIONS = ["예비과장", "과장", "차장", "부장", "이사"];
 
   useEffect(() => {
     fetch(`${API_BASE}/contract-types`).then((r) => r.json()).then((d) => {
@@ -2529,7 +2540,7 @@ function SystemPage({
                   <tr key={ct.id}>
                     <td>{ct.name}</td>
                     <td>{ct.contractYears}년</td>
-                    <td>대리/과장/차장/부장/이사</td>
+                    <td>예비과장/과장/차장/부장/이사</td>
                     <td><div className="ct-icon-btns">
                       <button className="icon-btn" title="편집" onClick={() => openEdit(ct)}><Pencil size={15} /></button>
                       <button className="icon-btn" title="삭제" onClick={() => deleteType(ct.id)}><Trash2 size={15} /></button>
@@ -2586,15 +2597,15 @@ function SystemPage({
                 <table className="grid appointment-rule-grid">
                   <thead>
                     <tr>
-                      <th>직급(세로축)</th>
-                      <th>연봉</th>
+                      <th style={{ textAlign: "center" }}>직급</th>
+                      <th>연봉(원)</th>
                       <th>활동비(원)</th>
                     </tr>
                   </thead>
                   <tbody>
                     {appointmentRules.map((rule, idx) => (
                       <tr key={rule.position}>
-                        <td style={{ fontWeight: 700, backgroundColor: "#f9fafb" }}>{rule.position}</td>
+                        <td style={{ fontWeight: 700, backgroundColor: "#f9fafb", textAlign: "center" }}>{rule.position}</td>
                         <td><input className="input-input" value={rule.basic.toLocaleString("ko-KR")} onChange={(e) => { const n = Number(e.target.value.replace(/[^\d]/g, "")); setAppointmentRules((prev) => prev.map((x, i) => i === idx ? ({ ...x, basic: n }) : x)); }} /></td>
                         <td><input className="input-input" value={rule.activity.toLocaleString("ko-KR")} onChange={(e) => { const n = Number(e.target.value.replace(/[^\d]/g, "")); setAppointmentRules((prev) => prev.map((x, i) => i === idx ? ({ ...x, activity: n }) : x)); }} /></td>
                       </tr>
@@ -2907,7 +2918,7 @@ export function App() {
             if (contractView === "detail") return <ContractDetail row={selectedContract} onBack={() => { loadContracts(); setContractView("list"); }} authUser={authUser} onUpdate={(updated) => setSelectedContract(updated)} />;
           }
           if (menu === "appointment") {
-            if (appointmentView === "list") return <AppointmentPage rows={contracts.filter(c => c.isAppointment || (c.type || "").includes("임용"))} onCreate={() => setAppointmentView("create")} onDetail={(r) => { setSelectedContract(r); setAppointmentView("detail"); }} />;
+            if (appointmentView === "list") return <AppointmentPage rows={contracts.filter(c => c.isAppointment || (c.type || "").includes("임용"))} onCreate={() => setAppointmentView("create")} onDetail={(r) => { setSelectedContract(r); setAppointmentView("detail"); }} onStatusChange={(id, status) => { fetch(`${API_BASE}/contracts/${id}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) }).then(r => r.json()).then(d => { if (d.ok) setContracts(prev => prev.map(c => c.id === id ? { ...c, status } : c)); }); }} />;
             if (appointmentView === "create") return <AppointmentCreate onBack={() => { loadContracts(); setAppointmentView("list"); }} />;
             if (appointmentView === "detail") return <ContractDetail row={selectedContract} onBack={() => { loadContracts(); setAppointmentView("list"); }} authUser={authUser} onUpdate={(updated) => setSelectedContract(updated)} />;
           }

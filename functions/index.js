@@ -317,6 +317,24 @@ app.put("/contracts/:contractNo", async (req, res) => {
   }
 });
 
+app.patch("/contracts/:id/status", async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body ?? {};
+  const allowed = ["정상운영", "일시정지", "계약해지", "계약만료"];
+  if (!status || !allowed.includes(status)) return res.status(400).json({ message: "유효하지 않은 상태값" });
+  try {
+    await ensureAppSchema();
+    const result = await pool.query(
+      "update contracts set status = $1, updated_at = now() where id = $2 returning id",
+      [status, id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ message: "contract not found" });
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
+  }
+});
+
 app.get("/contracts/:id/history", async (req, res) => {
   const { id } = req.params;
   try {

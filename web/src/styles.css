@@ -248,6 +248,10 @@ button { font-family: inherit; }
 .status-fixed.red { background: #ffeaea; color: #dc2626; }
 .status-fixed.amber { background: #fff4df; color: #c77800; }
 .status-fixed.blue { background: #eaf1ff; color: #1f6fff; }
+.status-select { border-radius: 999px; padding: 3px 8px; font-size: 12px; font-weight: 700; border: none; cursor: pointer; outline: none; }
+.status-select.status-green { background: #e9f9ee; color: #15a34a; }
+.status-select.status-orange { background: #fff4df; color: #c77800; }
+.status-select.status-red { background: #ffeaea; color: #dc2626; }
 .work-check {
   width: 16px;
   height: 16px;
@@ -388,7 +392,7 @@ button { font-family: inherit; }
 .referrer-grid th,
 .referrer-grid td { text-align: center; }
 .allowance-grid th,
-.allowance-grid td { text-align: center; }
+.allowance-grid td { text-align: center; padding-top: 4px; padding-bottom: 4px; }
 .account-grid th,
 .account-grid td { text-align: center; }
 .account-grid th,
