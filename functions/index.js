@@ -83,8 +83,8 @@ function normalizeRows(rows) {
     reportStartDate: row.report_start_date ? String(row.report_start_date).slice(0, 10) : "",
     position: row.position ?? "",
     phone: row.phone ?? "",
-    createdAt: row.created_at ? String(row.created_at).slice(0, 10) : "",
-    updatedAt: row.updated_at ? String(row.updated_at).slice(0, 10) : ""
+    createdAt: row.created_at ? toIsoDate(row.created_at) : "",
+    updatedAt: row.updated_at ? toIsoDate(row.updated_at) : ""
   }));
 }
 
@@ -226,7 +226,8 @@ app.get("/contracts", async (_req, res) => {
         work_start_date,
         report_start_date,
         position,
-        created_at
+        created_at,
+        updated_at
       from contracts
       where contractor_name is not null
         and btrim(contractor_name) <> ''

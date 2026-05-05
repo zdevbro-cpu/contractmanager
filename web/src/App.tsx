@@ -46,6 +46,8 @@ type ContractRowData = {
   workStartDate?: string;
   reportStartDate?: string;
   position?: string;
+  updatedAt?: string;
+  createdAt?: string;
 };
 
 type MenuKey = "dashboard" | "contracts" | "appointment" | "referrers" | "allowances" | "salaries" | "account" | "changes" | "system" | "none";
@@ -852,14 +854,16 @@ function ContractList({ onCreate, onDetail, rows }: { onCreate: () => void; onDe
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [dateMode, setDateMode] = useState<"계약일" | "변경일">("계약일");
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(15);
 
   const filtered = rows.filter((r) => {
     const q = search.trim().toLowerCase();
     if (q && !r.no.toLowerCase().includes(q) && !r.name.toLowerCase().includes(q) && !(r.ref || "").toLowerCase().includes(q)) return false;
-    if (dateFrom && r.contractDate < dateFrom) return false;
-    if (dateTo && r.contractDate > dateTo) return false;
+    const targetDate = dateMode === "변경일" ? (r.updatedAt || r.createdAt || "") : r.contractDate;
+    if (dateFrom && targetDate < dateFrom) return false;
+    if (dateTo && targetDate > dateTo) return false;
     return true;
   });
 
@@ -888,7 +892,7 @@ function ContractList({ onCreate, onDetail, rows }: { onCreate: () => void; onDe
             <Search size={16} />
             <input className="input-input" placeholder="계약번호, 계약자명, 추천인 검색" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
           </div>
-          <input className="date-filter-input" type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} />
+          <div style={{ display: "flex", border: "1px solid #dfe6f3", borderRadius: "8px", overflow: "hidden", flexShrink: 0 }}>{(["계약일", "변경일"] as const).map((m) => (<button key={m} type="button" onClick={() => { setDateMode(m); setPage(1); }} style={{ padding: "0 12px", height: "38px", border: "none", cursor: "pointer", fontSize: "13px", fontWeight: dateMode === m ? 600 : 400, background: dateMode === m ? "#1c75ff" : "#fff", color: dateMode === m ? "#fff" : "#5e6a83", transition: "all 0.15s" }}>{m}</button>))}</div><input className="date-filter-input" type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} />
           <span className="date-sep">~</span>
           <input className="date-filter-input" type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }} />
           <button className="line-btn" onClick={handleReset}>초기화</button>
