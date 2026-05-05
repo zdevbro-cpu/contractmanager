@@ -56,7 +56,7 @@ function normalizeRows(rows) {
     bankName: row.bank_name ?? "",
     accountNo: row.account_no ?? "",
     type: row.contract_name ?? "",
-    status: "정상운영",
+    status: row.status ?? "정상운영",
     verify: "검증완료",
     contractDate: toIsoDate(row.contract_date),
     payoutDate: toIsoDate(row.first_allowance_date),
@@ -78,6 +78,10 @@ function normalizeRows(rows) {
     residentRegistrationNumber: row.resident_registration_number ?? "",
     remarks: row.remarks ?? "",
     isAppointment: row.is_appointment ?? false,
+    insuranceType: row.insurance_type ?? "사업소득",
+    workStartDate: row.work_start_date ? String(row.work_start_date).slice(0, 10) : "",
+    reportStartDate: row.report_start_date ? String(row.report_start_date).slice(0, 10) : "",
+    position: row.position ?? "",
     phone: row.phone ?? "",
     createdAt: row.created_at ? String(row.created_at).slice(0, 10) : "",
     updatedAt: row.updated_at ? String(row.updated_at).slice(0, 10) : ""
@@ -95,6 +99,11 @@ async function ensureAppSchema() {
   await safeAlter("alter table contracts add column if not exists resident_registration_number text");
   await safeAlter("alter table contracts add column if not exists remarks text");
   await safeAlter("alter table contracts add column if not exists is_appointment boolean not null default false");
+  await safeAlter("alter table contracts add column if not exists insurance_type varchar(20) not null default '사업소득'");
+  await safeAlter("alter table contracts add column if not exists status varchar(20) not null default '정상운영'");
+  await safeAlter("alter table contracts add column if not exists work_start_date date");
+  await safeAlter("alter table contracts add column if not exists report_start_date date");
+  await safeAlter("alter table contracts add column if not exists position varchar(50)");
   await pool.query(`
     create table if not exists contract_types (
       id bigserial primary key,
@@ -212,6 +221,11 @@ app.get("/contracts", async (_req, res) => {
         resident_registration_number,
         remarks,
         is_appointment,
+        insurance_type,
+        status,
+        work_start_date,
+        report_start_date,
+        position,
         created_at
       from contracts
       where contractor_name is not null
@@ -233,8 +247,9 @@ app.post("/contracts", async (req, res) => {
         contract_no, contractor_name, contract_name,
         referrer_name, contract_date, first_allowance_date, contract_end_date,
         deposit_amount, work_allowance, bank_name, account_no, account_holder,
-        resident_registration_number, phone, is_appointment
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        resident_registration_number, phone, is_appointment, insurance_type,
+        work_start_date, report_start_date, position
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
       RETURNING id, contract_no`,
       [
         body.contractNo ?? null,
@@ -251,7 +266,11 @@ app.post("/contracts", async (req, res) => {
         body.accountHolder ?? null,
         body.residentRegistrationNumber ?? null,
         body.phone ?? null,
-        body.isAppointment === true
+        body.isAppointment === true,
+        body.insuranceType ?? "사업소득",
+        body.workStartDate ?? null,
+        body.reportStartDate ?? null,
+        body.position ?? null
       ]
     );
     res.json({ ok: true, id: result.rows[0].id, contractNo: result.rows[0].contract_no });
@@ -284,6 +303,10 @@ app.put("/contracts/:contractNo", async (req, res) => {
         resident_registration_number = coalesce($14, resident_registration_number),
         remarks = coalesce($15, remarks),
         phone = coalesce($16, phone),
+        insurance_type = coalesce($17, insurance_type),
+        work_start_date = coalesce($18, work_start_date),
+        report_start_date = coalesce($19, report_start_date),
+        position = coalesce($20, position),
         updated_at = now()
       where contract_no = $1 or id::text = $1 or id::text = split_part($1, '-', 3)
       returning contract_no
@@ -304,7 +327,11 @@ app.put("/contracts/:contractNo", async (req, res) => {
         body.accountHolder ?? null,
         body.residentRegistrationNumber ?? null,
         body.remarks ?? null,
-        body.phone ?? null
+        body.phone ?? null,
+        body.insuranceType ?? null,
+        body.workStartDate ?? null,
+        body.reportStartDate ?? null,
+        body.position ?? null
       ]
     );
     if (result.rowCount === 0) {
@@ -312,6 +339,16 @@ app.put("/contracts/:contractNo", async (req, res) => {
       return;
     }
     res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
+  }
+});
+
+app.delete("/contracts/appointments/clear", async (_req, res) => {
+  try {
+    await ensureAppSchema();
+    const result = await pool.query("delete from contracts where is_appointment = true returning id");
+    res.json({ ok: true, deleted: result.rowCount });
   } catch (error) {
     res.status(500).json({ message: String(error) });
   }

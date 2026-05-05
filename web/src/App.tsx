@@ -42,6 +42,10 @@ type ContractRowData = {
   accountHolder?: string;
   residentRegistrationNumber?: string;
   isAppointment?: boolean;
+  insuranceType?: string;
+  workStartDate?: string;
+  reportStartDate?: string;
+  position?: string;
 };
 
 type MenuKey = "dashboard" | "contracts" | "appointment" | "referrers" | "allowances" | "salaries" | "account" | "changes" | "system" | "none";
@@ -223,8 +227,11 @@ function AppointmentCreate({ onBack }: { onBack: () => void }) {
   const [bankName, setBankName] = useState("");
   const [accountNo, setAccountNo] = useState("");
   const [accountOwner, setAccountOwner] = useState("");
+  const [insuranceType, setInsuranceType] = useState<"사업소득" | "4대보험">("사업소득");
   const [manualEnd, setManualEnd] = useState(false);
   const [endDateOverride, setEndDateOverride] = useState("");
+  const [workStartDate, setWorkStartDate] = useState("");
+  const [reportStartDate, setReportStartDate] = useState("");
 
   const endDate = manualEnd ? endDateOverride : addYears(contractDate, selectedType?.contractYears ?? 3);
   const [contractNo, setContractNo] = useState("");
@@ -318,6 +325,10 @@ function AppointmentCreate({ onBack }: { onBack: () => void }) {
       phone,
       status: "승인대기",
       isAppointment: true,
+      insuranceType,
+      workStartDate: workStartDate || null,
+      reportStartDate: reportStartDate || null,
+      position: position || null,
       workFlag: true
     };
 
@@ -358,17 +369,39 @@ function AppointmentCreate({ onBack }: { onBack: () => void }) {
               {appointmentTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </label>
-          <label className="field"><span>계약번호(자동)</span><div className="input">{contractNo}</div></label>
+          <label className="field"><span>계약번호</span><input className="input-input" value={contractNo} onChange={(e) => setContractNo(e.target.value)} placeholder="계약번호" /></label>
         </div>
       </section>
 
       <section className="card">
         <div className="group-head">
           <div className="card-title-sm">계약정보</div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ fontSize: "13px", color: "#6b7280" }}>소득구분</span>
+            <button
+              type="button"
+              onClick={() => setInsuranceType(prev => prev === "사업소득" ? "4대보험" : "사업소득")}
+              style={{
+                width: "52px", height: "28px", borderRadius: "14px", border: "none", cursor: "pointer",
+                background: insuranceType === "4대보험" ? "#2563eb" : "#d1d5db",
+                position: "relative", transition: "background 0.2s"
+              }}
+            >
+              <span style={{
+                position: "absolute", top: "3px",
+                left: insuranceType === "4대보험" ? "26px" : "3px",
+                width: "22px", height: "22px", borderRadius: "50%",
+                background: "#fff", transition: "left 0.2s", display: "block"
+              }} />
+            </button>
+            <span style={{ fontSize: "13px", fontWeight: 600, color: insuranceType === "4대보험" ? "#2563eb" : "#9ca3af" }}>
+              {insuranceType}
+            </span>
+          </div>
         </div>
-        <div className="contract-info-row create-row">
+        <div className="contract-info-row six">
           <label className="field" style={{ position: "relative" }}>
-            <span>추천인명</span>
+            <span>추천인/추천점</span>
             <input
               className="input-input"
               placeholder="이름 검색 또는 선택"
@@ -420,24 +453,26 @@ function AppointmentCreate({ onBack }: { onBack: () => void }) {
               {positionOptions.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </label>
-        </div>
-        <div className="contract-info-row create-row">
           <label className="field">
             <span>연봉(원)</span>
             <input className="input-input" placeholder="0" value={deposit} onChange={(e) => { setDeposit(numFmt(e.target.value)); }} />
           </label>
-          <label className="field">
-            <span>활동비(원)</span>
-            <input className="input-input" placeholder="0" value={allowance} onChange={(e) => { setAllowance(numFmt(e.target.value)); }} />
-          </label>
+        </div>
+        <div className="contract-info-row six">
           <label className="field"><span>계약일</span><input className="input-input" type="date" value={contractDate} onChange={(e) => handleContractDate(e.target.value)} /></label>
           <label className="field">
             <span>급여일</span>
             <input className="input-input" type="date" value={payoutDate} onChange={(e) => { setManualPayout(true); setPayoutDate(e.target.value); }} />
           </label>
+          <label className="field"><span>업무개시일</span><input className="input-input" type="date" value={workStartDate} onChange={(e) => setWorkStartDate(e.target.value)} /></label>
+          <label className="field"><span>신고개시일</span><input className="input-input" type="date" value={reportStartDate} onChange={(e) => setReportStartDate(e.target.value)} /></label>
           <label className="field">
             <span>계약종료일</span>
             <input className="input-input" type="date" value={endDate} onChange={(e) => { setManualEnd(true); setEndDateOverride(e.target.value); }} />
+          </label>
+          <label className="field">
+            <span>활동비(원)</span>
+            <input className="input-input" placeholder="0" value={allowance} onChange={(e) => { setAllowance(numFmt(e.target.value)); }} />
           </label>
         </div>
       </section>
@@ -461,6 +496,40 @@ function AppointmentCreate({ onBack }: { onBack: () => void }) {
       </div>
     </div>
   );
+}
+
+// 2025 간이세액표 (부양가족 1인) [월급여, 소득세]
+const TAX_TABLE: [number, number][] = [
+  [1060000, 0], [1500000, 14060], [2000000, 35510], [2500000, 57000],
+  [3000000, 78410], [3500000, 103190], [4000000, 132440], [4500000, 163690],
+  [5000000, 196940], [5500000, 233080], [6000000, 267490],
+  [7000000, 341490], [8000000, 440000], [10000000, 650000],
+];
+function calcIncomeTax(monthly: number): number {
+  if (monthly <= TAX_TABLE[0][0]) return 0;
+  for (let i = 1; i < TAX_TABLE.length; i++) {
+    if (monthly <= TAX_TABLE[i][0]) {
+      const [x0, t0] = TAX_TABLE[i - 1];
+      const [x1, t1] = TAX_TABLE[i];
+      return Math.round(t0 + (t1 - t0) * (monthly - x0) / (x1 - x0));
+    }
+  }
+  const [xLast, tLast] = TAX_TABLE[TAX_TABLE.length - 1];
+  return Math.round(tLast + (monthly - xLast) * 0.38);
+}
+function calcSocialInsurance(salary: number, activity: number): number {
+  const monthly = Math.round(salary / 12);
+  const taxFreeActivity = Math.min(activity, 400000);
+  const taxableActivity = Math.max(activity - 400000, 0);
+  const base = Math.min(monthly + taxableActivity, 5900000); // 국민연금 상한
+  const pension = Math.round(base * 0.045);
+  const health = Math.round(base * 0.03545);
+  const ltc = Math.round(health * 0.1295);
+  const employ = Math.round(base * 0.009);
+  const incomeTax = calcIncomeTax(monthly + taxableActivity);
+  const localTax = Math.round(incomeTax * 0.1);
+  const totalDeduction = pension + health + ltc + employ + incomeTax + localTax;
+  return (monthly + taxFreeActivity + taxableActivity) - totalDeduction;
 }
 
 function SalaryPage({ rows }: { rows: ContractRowData[] }) {
@@ -491,14 +560,18 @@ function SalaryPage({ rows }: { rows: ContractRowData[] }) {
   });
 
   const filteredRows = allowanceRows.filter((row) => {
-    if (!row.baseDate) return true;
-    const inDate = (!startDate || row.baseDate >= startDate) && (!endDate || row.baseDate <= endDate);
+    const inDate = (!startDate || (row.baseDate && row.baseDate >= startDate)) &&
+                   (!endDate   || (row.baseDate && row.baseDate <= endDate));
     const inContractor = !contractorFilter || contractorFilter === "전체" || row.name.includes(contractorFilter);
     return inDate && inContractor;
   }).sort((a, b) => b.baseDate.localeCompare(a.baseDate) || a.name.localeCompare(b.name, "ko"));
 
   const getActivity = (r: typeof filteredRows[0]) => activityOverrides[r.id] ?? r.amount;
-  const paidAmount = (r: typeof filteredRows[0]) => Math.round((r.salary / 12 + getActivity(r)) * 0.967);
+  const paidAmount = (r: typeof filteredRows[0]) => {
+    const activity = getActivity(r);
+    if (r.insuranceType === "4대보험") return calcSocialInsurance(r.salary, activity);
+    return Math.round((r.salary / 12 + activity) * 0.967);
+  };
 
   const totalPaid = filteredRows.reduce((sum, r) => sum + paidAmount(r), 0);
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / perPage));
@@ -562,7 +635,7 @@ function SalaryPage({ rows }: { rows: ContractRowData[] }) {
 
       <section className="card">
         <div className="allowance-period-filter">
-          <label className="field"><span>시작일</span><input className="input-input" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setEndDate(e.target.value); setPage(1); }} /></label>
+          <label className="field"><span>시작일</span><input className="input-input" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setPage(1); }} /></label>
           <label className="field"><span>종료일</span><input className="input-input" type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setPage(1); }} /></label>
           <div className="field">
             <span>계약자명</span>
@@ -586,13 +659,18 @@ function SalaryPage({ rows }: { rows: ContractRowData[] }) {
         </div>
         <table className="grid allowance-grid">
           <thead>
-            <tr><th>급여일</th><th>계약자명</th><th>은행명</th><th>계좌번호</th><th>계약일자</th><th>계약종료일</th><th>급여(원)</th><th className="text-center">활동비(원)</th><th className="text-center">지급액(원)</th></tr>
+            <tr><th>급여일</th><th>계약자명</th><th className="text-center">소득구분</th><th>은행명</th><th>계좌번호</th><th>계약일자</th><th>계약종료일</th><th>급여(원)</th><th className="text-center">활동비(원)</th><th className="text-center">지급액(원)</th></tr>
           </thead>
           <tbody>
             {pagedRows.map((r) => (
               <tr key={r.no}>
                 <td>{r.baseDate || "-"}</td>
                 <td>{r.name || "-"}</td>
+                <td className="text-center">
+                  <span className={`status-fixed ${r.insuranceType === "4대보험" ? "blue" : "green"}`} style={{ fontSize: "11px", width: "auto", padding: "2px 8px" }}>
+                    {r.insuranceType === "4대보험" ? "4대보험" : "사업소득"}
+                  </span>
+                </td>
                 <td>{r.bankName}</td>
                 <td>{r.accountMasked}</td>
                 <td>{r.contractDate || "-"}</td>
@@ -1103,8 +1181,8 @@ function DetailBasicTab({ row }: { row: ContractRowData | null }) {
       <table className="grid"><tbody>
         <tr><th>계약번호</th><td>{row?.no ?? "-"}</td><th>계약일</th><td>{row?.contractDate ?? "-"}</td></tr>
         <tr><th>계약종류</th><td>{row?.type ?? "-"}</td><th>계약종료일</th><td>{row?.endDate ?? "-"}</td></tr>
-        <tr><th>계약자명</th><td>{row?.name ?? "-"}</td><th>연봉</th><td>{row?.depositAmount || "-"}</td></tr>
-        <tr><th>주민번호</th><td>{row?.residentRegistrationNumber || "-"}</td><th>급여일</th><td>{row?.payoutDate ?? "-"}</td></tr>
+        <tr><th>계약자명</th><td>{row?.name ?? "-"}</td><th>{row?.isAppointment ? "연봉" : "보증금"}</th><td>{row?.depositAmount || "-"}</td></tr>
+        <tr><th>주민번호</th><td>{row?.residentRegistrationNumber || "-"}</td><th>{row?.isAppointment ? "급여일" : "첫수당지급일"}</th><td>{row?.payoutDate ?? "-"}</td></tr>
         <tr><th>연락처</th><td>{row?.phone || "-"}</td><th>계약상태</th><td>{row?.status ?? "정상운영"}</td></tr>
       </tbody></table>
     </section>
@@ -2052,8 +2130,8 @@ function ChangePage({ rows: contractRows, authUser }: { rows: ContractRowData[];
       { field: "계약일자", before: (contractRows || [])[i]?.contractDate ?? "-", after: (contractRows || [])[i]?.contractDate ?? "-" },
       { field: "수당지급일", before: (contractRows || [])[i]?.payoutDate ?? "-", after: (contractRows || [])[i]?.payoutDate ?? "-" },
       { field: "계약종료일", before: (contractRows || [])[i]?.endDate ?? "-", after: (contractRows || [])[i]?.endDate ?? "-" },
-      { field: "보증금액", before: "100,000,000 원", after: "100,000,000 원" },
-      { field: "수당", before: "1,500,000 원", after: "1,500,000 원" },
+      { field: "연봉", before: "100,000,000 원", after: "100,000,000 원" },
+      { field: "활동비", before: "1,500,000 원", after: "1,500,000 원" },
       { field: "근무여부", before: i % 2 === 0 ? "근무" : "미근무", after: i % 2 === 0 ? "근무" : "미근무" },
       { field: "주소", before: "서울시 강남구 테헤란로 100", after: "서울시 강남구 테헤란로 100" },
       { field: "연락처", before: `010-12${String(30 + i).padStart(2, "0")}-56${String(70 + i).padStart(2, "0")}`, after: `010-12${String(30 + i).padStart(2, "0")}-56${String(70 + i).padStart(2, "0")}` },
@@ -2632,42 +2710,33 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
 
   const [historyDetailOpen, setHistoryDetailOpen] = useState(false);
   const [selectedHistory, setSelectedHistory] = useState<null | { at: string; before: string; after: string; reason: string; changedFields: Array<{ field: string; before: string; after: string }> }>(null);
-  const [changeFields, setChangeFields] = useState(() => [
-    { field: "계약번호", before: row?.no ?? "-", after: row?.no ?? "-", readOnlyAfter: true },
-    { field: "계약자명", before: row?.name ?? "-", after: row?.name ?? "-" },
-    { field: "추천인명", before: row?.ref || "-", after: row?.ref || "-" },
-    { field: "계약종류", before: row?.type ?? "-", after: row?.type ?? "-", readOnlyAfter: true },
-    { field: "계약일자", before: row?.contractDate ?? "", after: row?.contractDate ?? "" },
-    { field: "수당지급일", before: row?.payoutDate ?? "", after: row?.payoutDate ?? "" },
-    { field: "계약종료일", before: row?.endDate ?? "", after: row?.endDate ?? "" },
-    { field: "보증금액", before: row?.depositAmount || "-", after: row?.depositAmount || "-" },
-    { field: "수당", before: row?.allowanceAmount || "-", after: row?.allowanceAmount || "-" },
-    { field: "근무여부", before: "근무", after: "근무" },
-    { field: "연락처", before: row?.phone || "-", after: row?.phone || "-" },
-    { field: "주민번호", before: row?.residentRegistrationNumber || "-", after: row?.residentRegistrationNumber || "-" },
-    { field: "은행명", before: row?.bankName || "-", after: row?.bankName || "-" },
-    { field: "계좌번호", before: row?.accountNo || "-", after: row?.accountNo || "-" },
-    { field: "예금주명", before: row?.accountHolder || "-", after: row?.accountHolder || "-" }
-  ]);
-  
-  useEffect(() => {
-    setChangeFields([
-      { field: "계약번호", before: row?.no ?? "-", after: row?.no ?? "-", readOnlyAfter: true },
-      { field: "계약자명", before: row?.name ?? "-", after: row?.name ?? "-" },
-      { field: "추천인명", before: row?.ref || "-", after: row?.ref || "-" },
-      { field: "계약종류", before: row?.type ?? "-", after: row?.type ?? "-", readOnlyAfter: true },
-      { field: "계약일자", before: row?.contractDate ?? "", after: row?.contractDate ?? "" },
-      { field: "수당지급일", before: row?.payoutDate ?? "", after: row?.payoutDate ?? "" },
-      { field: "계약종료일", before: row?.endDate ?? "", after: row?.endDate ?? "" },
-      { field: "보증금액", before: row?.depositAmount || "-", after: row?.depositAmount || "-" },
-      { field: "수당", before: row?.allowanceAmount || "-", after: row?.allowanceAmount || "-" },
+  const buildChangeFields = (r: typeof row) => {
+    const isAppt = r?.isAppointment ?? false;
+    const fmtAmt = (v: string | undefined) => numFmt(v || "");
+    return [
+      { field: "계약번호", before: r?.no ?? "-", after: r?.no ?? "-", readOnlyAfter: true },
+      { field: "계약자명", before: r?.name ?? "-", after: r?.name ?? "-" },
+      { field: "추천인명", before: r?.ref || "-", after: r?.ref || "-" },
+      { field: "계약종류", before: r?.type ?? "-", after: r?.type ?? "-", readOnlyAfter: true },
+      { field: "계약일자", before: r?.contractDate ?? "", after: r?.contractDate ?? "" },
+      { field: "수당지급일", before: r?.payoutDate ?? "", after: r?.payoutDate ?? "" },
+      { field: "계약종료일", before: r?.endDate ?? "", after: r?.endDate ?? "" },
+      { field: isAppt ? "연봉" : "보증금", before: fmtAmt(r?.depositAmount), after: fmtAmt(r?.depositAmount) },
+      { field: isAppt ? "활동비" : "수당", before: fmtAmt(r?.allowanceAmount), after: fmtAmt(r?.allowanceAmount) },
+      ...(isAppt ? [{ field: "소득구분", before: r?.insuranceType || "사업소득", after: r?.insuranceType || "사업소득" }] : []),
       { field: "근무여부", before: "근무", after: "근무" },
-      { field: "연락처", before: row?.phone || "-", after: row?.phone || "-" },
-      { field: "주민번호", before: row?.residentRegistrationNumber || "-", after: row?.residentRegistrationNumber || "-" },
-      { field: "은행명", before: row?.bankName || "-", after: row?.bankName || "-" },
-      { field: "계좌번호", before: row?.accountNo || "-", after: row?.accountNo || "-" },
-      { field: "예금주명", before: row?.accountHolder || "-", after: row?.accountHolder || "-" }
-    ]);
+      { field: "연락처", before: r?.phone || "-", after: r?.phone || "-" },
+      { field: "주민번호", before: r?.residentRegistrationNumber || "-", after: r?.residentRegistrationNumber || "-" },
+      { field: "은행명", before: r?.bankName || "-", after: r?.bankName || "-" },
+      { field: "계좌번호", before: r?.accountNo || "-", after: r?.accountNo || "-" },
+      { field: "예금주명", before: r?.accountHolder || "-", after: r?.accountHolder || "-" }
+    ];
+  };
+
+  const [changeFields, setChangeFields] = useState(() => buildChangeFields(row));
+
+  useEffect(() => {
+    setChangeFields(buildChangeFields(row));
   }, [row]);
 
   const saveChangeRequest = async () => {
@@ -2699,8 +2768,9 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
           if (f.field === "계약일자") updateBody.contractDate = f.after;
           if (f.field === "수당지급일") updateBody.payoutDate = f.after;
           if (f.field === "계약종료일") updateBody.endDate = f.after;
-          if (f.field === "보증금액") updateBody.depositAmountValue = Number(f.after.replace(/[^0-9]/g, ""));
-          if (f.field === "수당") updateBody.allowanceAmountValue = Number(f.after.replace(/[^0-9]/g, ""));
+          if (f.field === "연봉" || f.field === "보증금") updateBody.depositAmountValue = Number(f.after.replace(/[^0-9]/g, ""));
+          if (f.field === "활동비" || f.field === "수당") updateBody.allowanceAmountValue = Number(f.after.replace(/[^0-9]/g, ""));
+          if (f.field === "소득구분") updateBody.insuranceType = f.after;
           if (f.field === "연락처") updateBody.phone = f.after;
           if (f.field === "주민번호") updateBody.residentRegistrationNumber = f.after;
           if (f.field === "은행명") updateBody.bankName = f.after;
@@ -2727,8 +2797,9 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
               if (f.field === "계약일자") updatedRow.contractDate = f.after;
               if (f.field === "수당지급일") updatedRow.payoutDate = f.after;
               if (f.field === "계약종료일") updatedRow.endDate = f.after;
-              if (f.field === "보증금액") updatedRow.depositAmount = f.after;
-              if (f.field === "수당") updatedRow.allowanceAmount = f.after;
+              if (f.field === "연봉" || f.field === "보증금") updatedRow.depositAmount = f.after;
+              if (f.field === "활동비" || f.field === "수당") updatedRow.allowanceAmount = f.after;
+              if (f.field === "소득구분") updatedRow.insuranceType = f.after;
               if (f.field === "연락처") updatedRow.phone = f.after;
               if (f.field === "주민번호") updatedRow.residentRegistrationNumber = f.after;
               if (f.field === "은행명") updatedRow.bankName = f.after;
@@ -2772,6 +2843,17 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
                       <option value="근무">근무</option>
                       <option value="미근무">미근무</option>
                     </select>
+                  ) : fc.field === "소득구분" ? (
+                    <select className="cell-select" value={fc.after} onChange={(e) => setChangeFields((prev) => prev.map((x, i) => i === idx ? ({ ...x, after: e.target.value }) : x))}>
+                      <option value="사업소득">사업소득</option>
+                      <option value="4대보험">4대보험</option>
+                    </select>
+                  ) : ["연봉", "보증금", "활동비", "수당"].includes(fc.field) ? (
+                    <input className="cell-input" value={fc.after} readOnly={Boolean(fc.readOnlyAfter)}
+                      onChange={(e) => {
+                        const formatted = numFmt(e.target.value);
+                        setChangeFields((prev) => prev.map((x, i) => i === idx ? ({ ...x, after: formatted }) : x));
+                      }} />
                   ) : (
                     <input className="cell-input" value={fc.after} readOnly={Boolean(fc.readOnlyAfter)} onChange={(e) => setChangeFields((prev) => prev.map((x, i) => i === idx ? ({ ...x, after: e.target.value }) : x))} />
                   )}
@@ -2961,6 +3043,7 @@ export function App() {
             if (m.key !== "none") {
               setMenu(m.key);
               if (m.key !== "contracts") setContractView("list");
+              if (m.key !== "appointment") setAppointmentView("list");
             }
           }}
         >
