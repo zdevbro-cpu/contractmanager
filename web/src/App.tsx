@@ -327,7 +327,7 @@ function AppointmentCreate({ onBack }: { onBack: () => void }) {
 
   return (
     <div>
-      <div className="head-with-btn"><PageHeader title="신규 임용계약 등록" desc="계약 정보를 입력하고 등록하세요." /><button className="line-btn" onClick={onBack}>목록으로</button></div>
+      <div className="head-with-btn"><PageHeader title="임용계약 등록" desc="계약 정보를 입력하고 등록하세요." /><button className="line-btn" onClick={onBack}>목록으로</button></div>
 
       <section className="card">
         <div className="card-title-sm">기본정보</div>
@@ -401,14 +401,7 @@ function AppointmentCreate({ onBack }: { onBack: () => void }) {
           </select>
           <input className="input-input" placeholder="계좌번호" value={accountNo} onChange={(e) => setAccountNo(e.target.value)} />
           <input className="input-input" placeholder="예금주" value={accountOwner} onChange={(e) => setAccountOwner(e.target.value)} />
-          <button className="primary-btn action-btn" onClick={downloadAccountVerification}>계좌실명확인</button>
-        </div>
-      </section>
-
-      <section className="card">
-        <div className="card-title-sm">첨부파일</div>
-        <div className="form-grid">
-          <label className="field"><span>첨부파일(계약서, 입금증, 신분증 포함)</span><div className="dropzone">파일을 드래그하거나 클릭하여 업로드하세요</div></label>
+          <button className="primary-btn action-btn" onClick={downloadAccountVerification}>계좌확인생성</button>
         </div>
       </section>
 
