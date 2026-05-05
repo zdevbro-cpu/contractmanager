@@ -465,17 +465,13 @@ function AppointmentCreate({ onBack }: { onBack: () => void }) {
 
 function SalaryPage({ rows }: { rows: ContractRowData[] }) {
   const today = new Date().toISOString().slice(0, 10);
-  const [startDate, setStartDate] = useState(today);
+  const [startDate, setStartDate] = useState(`${new Date().getFullYear()}-01-01`);
   const [endDate, setEndDate] = useState(today);
   const [contractorFilter, setContractorFilter] = useState("전체");
   const [perPage, setPerPage] = useState(20);
   const [page, setPage] = useState(1);
   const [activityOverrides, setActivityOverrides] = useState<Record<number, number>>({});
 
-  const parseLocalDate = (dateStr: string) => {
-    const [y, m, d] = dateStr.split("-").map(Number);
-    return new Date(y, m - 1, d);
-  };
 
   const allowanceRows = (rows || []).map((r) => {
     const rawAccountNo = r.accountNo || "";
@@ -495,16 +491,8 @@ function SalaryPage({ rows }: { rows: ContractRowData[] }) {
   });
 
   const filteredRows = allowanceRows.filter((row) => {
-    if (!row.baseDate || !startDate || !endDate) return true;
-    const filterStart = parseLocalDate(startDate);
-    const filterEnd = parseLocalDate(endDate);
-    const startDay = filterStart.getDate();
-    const endDay = filterEnd.getDate();
-    const recordDate = parseLocalDate(row.baseDate);
-    const recordDay = recordDate.getDate();
-    const dayMatches = recordDay >= startDay && recordDay <= endDay;
-    const isPastOrPresent = recordDate.getTime() <= filterEnd.getTime();
-    const inDate = dayMatches && isPastOrPresent;
+    if (!row.baseDate) return true;
+    const inDate = (!startDate || row.baseDate >= startDate) && (!endDate || row.baseDate <= endDate);
     const inContractor = !contractorFilter || contractorFilter === "전체" || row.name.includes(contractorFilter);
     return inDate && inContractor;
   }).sort((a, b) => b.baseDate.localeCompare(a.baseDate) || a.name.localeCompare(b.name, "ko"));
@@ -585,7 +573,7 @@ function SalaryPage({ rows }: { rows: ContractRowData[] }) {
             </div>
           </div>
           <div className="allowance-filter-actions">
-            <button className="line-btn allowance-reset-btn" onClick={() => { setStartDate(today); setEndDate(today); setContractorFilter("전체"); setPage(1); }}>초기화</button>
+            <button className="line-btn allowance-reset-btn" onClick={() => { setStartDate(`${new Date().getFullYear()}-01-01`); setEndDate(today); setContractorFilter("전체"); setPage(1); }}>초기화</button>
             <button className="primary-btn allowance-export-btn" onClick={exportFilteredList}>출력</button>
           </div>
         </div>
@@ -621,7 +609,7 @@ function SalaryPage({ rows }: { rows: ContractRowData[] }) {
                     }}
                   />
                 </td>
-                <td className="text-right">{paidAmount(r).toLocaleString("ko-KR")}</td>
+                <td className="text-center">{paidAmount(r).toLocaleString("ko-KR")}</td>
               </tr>
             ))}
           </tbody>
@@ -787,7 +775,7 @@ function ContractList({ onCreate, onDetail, rows }: { onCreate: () => void; onDe
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(20);
+  const [perPage, setPerPage] = useState(15);
 
   const filtered = rows.filter((r) => {
     const q = search.trim().toLowerCase();
@@ -843,7 +831,7 @@ function ContractList({ onCreate, onDetail, rows }: { onCreate: () => void; onDe
             <button className="pager-btn" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={safePage === totalPages}>›</button>
           </div>
           <div className="pager-right">
-            {[20, 50, 100].map((n) => (
+            {[15, 50, 100].map((n) => (
               <button key={n} className={`pager-btn${perPage === n ? " active" : ""}`} onClick={() => { setPerPage(n); setPage(1); }}>{n}개</button>
             ))}
           </div>
