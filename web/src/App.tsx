@@ -203,6 +203,8 @@ function AppointmentCreate({ onBack }: { onBack: () => void }) {
   const [deposit, setDeposit] = useState("");
   const [allowance, setAllowance] = useState("");
   const [referrerId, setReferrerId] = useState("");
+  const [referrerSearch, setReferrerSearch] = useState("");
+  const [showReferrerList, setShowReferrerList] = useState(false);
   const [contractorName, setContractorName] = useState("");
   const [rrn, setRrn] = useState("");
   const [phone, setPhone] = useState("");
@@ -291,7 +293,7 @@ function AppointmentCreate({ onBack }: { onBack: () => void }) {
       contractNo,
       type: selectedType?.name || "임용계약",
       name: contractorName,
-      ref: referrerId,
+      ref: referrers.find(r => String(r.id) === referrerId)?.name || "",
       contractDate,
       payoutDate,
       endDate,
@@ -353,12 +355,48 @@ function AppointmentCreate({ onBack }: { onBack: () => void }) {
           <div className="card-title-sm">계약정보</div>
         </div>
         <div className="contract-info-row create-row">
-          <label className="field">
+          <label className="field" style={{ position: "relative" }}>
             <span>추천인명</span>
-            <select className="input-input" value={referrerId} onChange={(e) => setReferrerId(e.target.value)}>
-              <option value="">-- 선택 --</option>
-              {referrers.map((r) => <option key={r.id} value={String(r.id)}>{r.name}</option>)}
-            </select>
+            <input
+              className="input-input"
+              placeholder="이름 검색 또는 선택"
+              value={referrerSearch}
+              autoComplete="off"
+              onFocus={() => setShowReferrerList(true)}
+              onBlur={() => setTimeout(() => setShowReferrerList(false), 150)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setReferrerSearch(val);
+                setShowReferrerList(true);
+                const found = referrers.find(r => r.name === val);
+                setReferrerId(found ? String(found.id) : "");
+              }}
+            />
+            {showReferrerList && (
+              <ul style={{
+                position: "absolute", top: "100%", left: 0, right: 0,
+                maxHeight: "180px", overflowY: "auto",
+                background: "#fff", border: "1px solid #ccc", borderRadius: "4px",
+                margin: 0, padding: 0, listStyle: "none", zIndex: 999,
+                boxShadow: "0 2px 6px rgba(0,0,0,0.15)"
+              }}>
+                {[...referrers]
+                  .filter(r => !referrerSearch || r.name.includes(referrerSearch))
+                  .sort((a, b) => a.name.localeCompare(b.name, "ko"))
+                  .map(r => (
+                    <li key={r.id}
+                      style={{ padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}
+                      onMouseEnter={e => (e.currentTarget.style.background = "#f0f0f0")}
+                      onMouseLeave={e => (e.currentTarget.style.background = "")}
+                      onMouseDown={() => {
+                        setReferrerSearch(r.name);
+                        setReferrerId(String(r.id));
+                        setShowReferrerList(false);
+                      }}
+                    >{r.name}</li>
+                  ))}
+              </ul>
+            )}
           </label>
           <label className="field"><span>계약자명</span><input className="input-input" placeholder="계약자명" value={contractorName} onChange={(e) => setContractorName(e.target.value)} /></label>
           <label className="field"><span>주민번호</span><input className="input-input" placeholder="000000-0000000" value={rrn} onChange={(e) => setRrn(rrnFmt(e.target.value))} maxLength={14} /></label>
@@ -420,6 +458,7 @@ function SalaryPage({ rows }: { rows: ContractRowData[] }) {
   const [contractorFilter, setContractorFilter] = useState("전체");
   const [perPage, setPerPage] = useState(20);
   const [page, setPage] = useState(1);
+  const [activityOverrides, setActivityOverrides] = useState<Record<number, number>>({});
 
   const parseLocalDate = (dateStr: string) => {
     const [y, m, d] = dateStr.split("-").map(Number);
@@ -435,6 +474,7 @@ function SalaryPage({ rows }: { rows: ContractRowData[] }) {
       ...r,
       baseDate: r.payoutDate || "",
       amount: Number(r.allowanceAmountRaw ?? 0),
+      salary: Number(r.depositAmountRaw ?? 0),
       bankName: r.bankName || "",
       accountNo: rawAccountNo,
       accountMasked: masked || "",
@@ -457,10 +497,15 @@ function SalaryPage({ rows }: { rows: ContractRowData[] }) {
     return inDate && inContractor;
   }).sort((a, b) => b.baseDate.localeCompare(a.baseDate) || a.name.localeCompare(b.name, "ko"));
 
-  const totalAmount = filteredRows.reduce((sum, row) => sum + row.amount, 0);
+  const getActivity = (r: typeof filteredRows[0]) => activityOverrides[r.id] ?? r.amount;
+  const paidAmount = (r: typeof filteredRows[0]) => Math.round((r.salary / 12 + getActivity(r)) * 0.967);
+
+  const totalPaid = filteredRows.reduce((sum, r) => sum + paidAmount(r), 0);
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / perPage));
   const safePage = Math.min(page, totalPages);
   const pagedRows = filteredRows.slice((safePage - 1) * perPage, safePage * perPage);
+
+  const amountText = (value: number) => `${Number(value).toLocaleString("ko-KR")} 원`;
 
   const pageButtons = (): (number | "...")[] => {
     if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
@@ -472,12 +517,14 @@ function SalaryPage({ rows }: { rows: ContractRowData[] }) {
     return pages;
   };
 
-  const amountText = (value: number) => `${Number(value).toLocaleString("ko-KR")} 원`;
-  const paidAmount = (value: number) => Math.round(value * 0.967);
-
   const exportFilteredList = async () => {
     const amountOnly = (value: number) => `${value.toLocaleString("ko-KR")}원`;
-    const body = filteredRows.map((r) => [r.name, amountOnly(paidAmount(r.amount)), r.bankName, r.accountNo].join(" "));
+    const body = filteredRows.map((r) => {
+      const holder = r.accountHolder || "";
+      const name = r.name || "";
+      const holderPart = holder && holder !== name ? `(${holder})` : "";
+      return [name, amountOnly(paidAmount(r)), r.bankName, r.accountNo + holderPart].join(" ");
+    });
     const content = body.join("\r\n");
     const fileName = `급여지급목록_${endDate}_${startDate}.txt`;
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
@@ -493,7 +540,7 @@ function SalaryPage({ rows }: { rows: ContractRowData[] }) {
 
   const topStats = [
     { label: "지급대상 건수", value: `${filteredRows.length} 건`, sub: "기간 필터 기준", icon: <Wallet size={22} />, tone: "blue" },
-    { label: "지급예정 금액", value: amountText(totalAmount), sub: "기간 내 총 예상 지급", icon: <CircleDollarSign size={22} />, tone: "green" },
+    { label: "지급예정 금액", value: amountText(totalPaid), sub: "기간 내 총 예상 지급", icon: <CircleDollarSign size={22} />, tone: "green" },
     { label: "지급보류 건수", value: `${filteredRows.filter((r) => (r.status || "").includes("대기") || (r.status || "").includes("변경")).length} 건`, sub: "대기/변경 건수", icon: <Landmark size={22} />, tone: "orange" }
   ] as const;
 
@@ -535,16 +582,35 @@ function SalaryPage({ rows }: { rows: ContractRowData[] }) {
       <section className="card">
         <div className="group-head">
           <div className="card-title-sm">전체 {filteredRows.length.toLocaleString("ko-KR")}건</div>
-          <div className="card-title-sm" style={{ fontWeight: 600 }}>지급 총액: {filteredRows.reduce((sum, r) => sum + paidAmount(r.amount), 0).toLocaleString("ko-KR")} 원</div>
+          <div className="card-title-sm" style={{ fontWeight: 600 }}>지급 총액: {totalPaid.toLocaleString("ko-KR")} 원</div>
         </div>
         <table className="grid allowance-grid">
           <thead>
-            <tr><th>급여일</th><th>계약자명</th><th>추천인</th><th>은행명</th><th>계좌번호</th><th>계약일자</th><th>계약종료일</th><th>급여금액</th><th className="text-center">활동비</th><th className="text-center">지급금액</th></tr>
+            <tr><th>급여일</th><th>계약자명</th><th>추천인</th><th>은행명</th><th>계좌번호</th><th>계약일자</th><th>계약종료일</th><th>급여(원)</th><th className="text-center">활동비(원)</th><th className="text-center">지급액(원)</th></tr>
           </thead>
           <tbody>
             {pagedRows.map((r) => (
               <tr key={r.no}>
-                <td>{r.baseDate || "-"}</td><td>{r.name || "-"}</td><td>{r.ref || "-"}</td><td>{r.bankName}</td><td>{r.accountMasked}</td><td>{r.contractDate || "-"}</td><td>{r.endDate || "-"}</td><td>{r.depositAmount || "-"}</td><td className="text-right">{amountText(r.amount)}</td><td className="text-right">{amountText(paidAmount(r.amount))}</td>
+                <td>{r.baseDate || "-"}</td>
+                <td>{r.name || "-"}</td>
+                <td>{r.ref || "-"}</td>
+                <td>{r.bankName}</td>
+                <td>{r.accountMasked}</td>
+                <td>{r.contractDate || "-"}</td>
+                <td>{r.endDate || "-"}</td>
+                <td>{r.depositAmount || "-"}</td>
+                <td className="text-center">
+                  <input
+                    className="input-input"
+                    style={{ textAlign: "center", width: "100px" }}
+                    value={getActivity(r).toLocaleString("ko-KR")}
+                    onChange={(e) => {
+                      const n = Number(e.target.value.replace(/[^\d]/g, ""));
+                      setActivityOverrides((prev) => ({ ...prev, [r.id]: n }));
+                    }}
+                  />
+                </td>
+                <td className="text-right">{amountText(paidAmount(r))}</td>
               </tr>
             ))}
           </tbody>
@@ -791,6 +857,8 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
   const [allowance, setAllowance] = useState("");
   const [manualAllowance, setManualAllowance] = useState(false);
   const [referrerId, setReferrerId] = useState("");
+  const [referrerSearch, setReferrerSearch] = useState("");
+  const [showReferrerList, setShowReferrerList] = useState(false);
   const [contractorName, setContractorName] = useState("");
   const [rrn, setRrn] = useState("");
   const [phone, setPhone] = useState("");
@@ -868,7 +936,7 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
       contractNo,
       type: selectedType?.name || "",
       name: contractorName,
-      ref: referrerId,
+      ref: referrers.find(r => String(r.id) === referrerId)?.name || "",
       contractDate,
       payoutDate,
       endDate,
@@ -933,12 +1001,48 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
           </label>
         </div>
         <div className="contract-info-row create-row">
-          <label className="field">
+          <label className="field" style={{ position: "relative" }}>
             <span>추천인명</span>
-            <select className="input-input" value={referrerId} onChange={(e) => setReferrerId(e.target.value)}>
-              <option value="">-- 선택 --</option>
-              {referrers.map((r) => <option key={r.id} value={String(r.id)}>{r.name}</option>)}
-            </select>
+            <input
+              className="input-input"
+              placeholder="이름 검색 또는 선택"
+              value={referrerSearch}
+              autoComplete="off"
+              onFocus={() => setShowReferrerList(true)}
+              onBlur={() => setTimeout(() => setShowReferrerList(false), 150)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setReferrerSearch(val);
+                setShowReferrerList(true);
+                const found = referrers.find(r => r.name === val);
+                setReferrerId(found ? String(found.id) : "");
+              }}
+            />
+            {showReferrerList && (
+              <ul style={{
+                position: "absolute", top: "100%", left: 0, right: 0,
+                maxHeight: "180px", overflowY: "auto",
+                background: "#fff", border: "1px solid #ccc", borderRadius: "4px",
+                margin: 0, padding: 0, listStyle: "none", zIndex: 999,
+                boxShadow: "0 2px 6px rgba(0,0,0,0.15)"
+              }}>
+                {[...referrers]
+                  .filter(r => !referrerSearch || r.name.includes(referrerSearch))
+                  .sort((a, b) => a.name.localeCompare(b.name, "ko"))
+                  .map(r => (
+                    <li key={r.id}
+                      style={{ padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}
+                      onMouseEnter={e => (e.currentTarget.style.background = "#f0f0f0")}
+                      onMouseLeave={e => (e.currentTarget.style.background = "")}
+                      onMouseDown={() => {
+                        setReferrerSearch(r.name);
+                        setReferrerId(String(r.id));
+                        setShowReferrerList(false);
+                      }}
+                    >{r.name}</li>
+                  ))}
+              </ul>
+            )}
           </label>
           <label className="field"><span>계약자명</span><input className="input-input" placeholder="계약자명" value={contractorName} onChange={(e) => setContractorName(e.target.value)} /></label>
           <label className="field"><span>주민번호</span><input className="input-input" placeholder="000000-0000000" value={rrn} onChange={(e) => setRrn(rrnFmt(e.target.value))} maxLength={14} /></label>
@@ -1000,8 +1104,8 @@ function DetailBasicTab({ row }: { row: ContractRowData | null }) {
       <table className="grid"><tbody>
         <tr><th>계약번호</th><td>{row?.no ?? "-"}</td><th>계약일</th><td>{row?.contractDate ?? "-"}</td></tr>
         <tr><th>계약종류</th><td>{row?.type ?? "-"}</td><th>계약종료일</th><td>{row?.endDate ?? "-"}</td></tr>
-        <tr><th>계약자명</th><td>{row?.name ?? "-"}</td><th>보증금액</th><td>{row?.depositAmount || "-"}</td></tr>
-        <tr><th>주민번호</th><td>{row?.residentRegistrationNumber || "-"}</td><th>첫수당지급일</th><td>{row?.payoutDate ?? "-"}</td></tr>
+        <tr><th>계약자명</th><td>{row?.name ?? "-"}</td><th>연봉</th><td>{row?.depositAmount || "-"}</td></tr>
+        <tr><th>주민번호</th><td>{row?.residentRegistrationNumber || "-"}</td><th>급여일</th><td>{row?.payoutDate ?? "-"}</td></tr>
         <tr><th>연락처</th><td>{row?.phone || "-"}</td><th>계약상태</th><td>{row?.status ?? "정상운영"}</td></tr>
       </tbody></table>
     </section>
@@ -2484,7 +2588,6 @@ function SystemPage({
                     <tr>
                       <th>직급(세로축)</th>
                       <th>연봉</th>
-                      <th>상여(원)</th>
                       <th>활동비(원)</th>
                     </tr>
                   </thead>
@@ -2493,7 +2596,6 @@ function SystemPage({
                       <tr key={rule.position}>
                         <td style={{ fontWeight: 700, backgroundColor: "#f9fafb" }}>{rule.position}</td>
                         <td><input className="input-input" value={rule.basic.toLocaleString("ko-KR")} onChange={(e) => { const n = Number(e.target.value.replace(/[^\d]/g, "")); setAppointmentRules((prev) => prev.map((x, i) => i === idx ? ({ ...x, basic: n }) : x)); }} /></td>
-                        <td><input className="input-input" value={rule.bonus.toLocaleString("ko-KR")} onChange={(e) => { const n = Number(e.target.value.replace(/[^\d]/g, "")); setAppointmentRules((prev) => prev.map((x, i) => i === idx ? ({ ...x, bonus: n }) : x)); }} /></td>
                         <td><input className="input-input" value={rule.activity.toLocaleString("ko-KR")} onChange={(e) => { const n = Number(e.target.value.replace(/[^\d]/g, "")); setAppointmentRules((prev) => prev.map((x, i) => i === idx ? ({ ...x, activity: n }) : x)); }} /></td>
                       </tr>
                     ))}
@@ -2811,7 +2913,7 @@ export function App() {
           }
           if (menu === "referrers") return <ReferrerPage />;
           if (menu === "allowances") return <AllowancePage rows={contracts} />;
-          if (menu === "salaries") return <SalaryPage rows={[]} />;
+          if (menu === "salaries") return <SalaryPage rows={contracts.filter(c => c.isAppointment || (c.type || "").includes("임용"))} />;
           if (menu === "account") return <AccountPage rows={contracts} />;
           if (menu === "changes") return <ChangePage rows={contracts} authUser={authUser} onRefresh={loadContracts} />;
           if (menu === "system") return <SystemPage users={users} setUsers={setUsers} onAddUserWithTempPassword={addUserWithTempPassword} onResetPassword={resetPassword} authUser={authUser} />;
