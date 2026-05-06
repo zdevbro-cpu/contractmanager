@@ -1159,11 +1159,14 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
   const [bankName, setBankName] = useState("");
   const [accountNo, setAccountNo] = useState("");
   const [accountOwner, setAccountOwner] = useState("");
+  const [accountOwnerEdited, setAccountOwnerEdited] = useState(false);
   const [manualEnd, setManualEnd] = useState(false);
   const [endDateOverride, setEndDateOverride] = useState("");
   const [affiliation, setAffiliation] = useState("");
   const [managerName, setManagerName] = useState("");
   const [contractNoInput, setContractNoInput] = useState("");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const endDate = manualEnd ? endDateOverride : addYears(contractDate, selectedType?.contractYears ?? 3);
   const autoContractNo = `LASM-${compactDate(contractDate)}-011`;
@@ -1270,6 +1273,24 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
         body: JSON.stringify(body)
       });
       if (res.ok) {
+        const data = await res.json();
+        const newId = data.id;
+        if (uploadFile && newId) {
+          const base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve((reader.result as string).split(",")[1]);
+            reader.onerror = reject;
+            reader.readAsDataURL(uploadFile);
+          });
+          const uploadRes = await fetch(`/api/contracts/${newId}/pdf`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ filename: uploadFile.name, data: base64, mimeType: uploadFile.type || "application/pdf", reason: "신규등록" })
+          });
+          if (!uploadRes.ok) {
+            alert("계약은 등록되었으나 파일 업로드에 실패했습니다.");
+          }
+        }
         alert("계약이 등록되었습니다.");
         onBack();
       } else {
@@ -1357,7 +1378,7 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
               </ul>
             )}
           </label>
-          <label className="field"><span>계약자명</span><input className="input-input" placeholder="계약자명" value={contractorName} onChange={(e) => setContractorName(e.target.value)} /></label>
+          <label className="field"><span>계약자명</span><input className="input-input" placeholder="계약자명" value={contractorName} onChange={(e) => { setContractorName(e.target.value); if (!accountOwnerEdited) setAccountOwner(e.target.value); }} /></label>
           <label className="field"><span>주민번호</span><input className="input-input" placeholder="000000-0000000" value={rrn} onChange={(e) => setRrn(rrnFmt(e.target.value))} maxLength={14} /></label>
           <label className="field"><span>연락처</span><input className="input-input" placeholder="010-0000-0000" value={phone} onChange={(e) => setPhone(phoneFmt(e.target.value))} maxLength={13} /></label>
         </div>
@@ -1390,7 +1411,7 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
             {BANKS.map((b) => <option key={b} value={b}>{b}</option>)}
           </select>
           <input className="input-input" placeholder="계좌번호" value={accountNo} onChange={(e) => setAccountNo(e.target.value)} />
-          <input className="input-input" placeholder="예금주" value={accountOwner} onChange={(e) => setAccountOwner(e.target.value)} />
+          <input className="input-input" placeholder="예금주" value={accountOwner} onChange={(e) => { setAccountOwnerEdited(true); setAccountOwner(e.target.value); }} />
           <button className="primary-btn action-btn" onClick={downloadAccountVerification}>계좌확인생성</button>
         </div>
       </section>
@@ -1398,7 +1419,20 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
       <section className="card">
         <div className="card-title-sm">첨부파일</div>
         <div className="form-grid">
-          <label className="field"><span>첨부파일(계약서, 입금증, 신분증 포함)</span><div className="dropzone">파일을 드래그하거나 클릭하여 업로드하세요</div></label>
+          <label className="field">
+            <span>첨부파일(계약서, 입금증, 신분증 포함)</span>
+            <div className="dropzone"
+              onClick={() => fileInputRef.current?.click()}
+              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const f = e.dataTransfer.files?.[0]; if (f) setUploadFile(f); }}
+              style={{ cursor: "pointer" }}>
+              {uploadFile ? uploadFile.name : "파일을 드래그하거나 클릭하여 업로드하세요"}
+            </div>
+            <input ref={fileInputRef} type="file" accept=".pdf,application/pdf,image/*" hidden
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) setUploadFile(f); }} />
+          </label>
         </div>
       </section>
 
