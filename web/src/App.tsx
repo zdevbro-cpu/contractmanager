@@ -92,7 +92,8 @@ const menus: { key: MenuKey; label: string; icon: JSX.Element; indent?: boolean;
   { key: "system", label: "시스템관리", icon: <Settings size={18} /> }
 ];
 
-const CONTRACT_STATUS_OPTIONS = ["정상운영", "양도", "양수", "계약해지"];
+const CONTRACT_STATUS_OPTIONS = ["정상운영", "일부양도", "양도", "양수", "계약해지"];
+const INACTIVE_STATUSES = new Set(["양도", "계약해지", "계약만료"]);
 
 function appointmentStatusClass(status: string) {
   if (status === "정상운영") return "green";
@@ -614,7 +615,7 @@ function SalaryPage({ rows }: { rows: ContractRowData[] }) {
   });
 
   const filteredRows = allowanceRows.filter((row) => {
-    if (row.status !== "정상운영") return false;
+    if (INACTIVE_STATUSES.has(row.status)) return false;
     const inDate = (!startDate || (row.baseDate && row.baseDate >= startDate)) &&
                    (!endDate   || (row.baseDate && row.baseDate <= endDate));
     const inContractor = !contractorFilter || contractorFilter === "전체" || row.name.includes(contractorFilter);
@@ -818,7 +819,7 @@ function formatDateTime(v: string) {
 
 function statusClass(s: string) {
   if (s.includes("정상") || s.includes("완료")) return "green";
-  if (s === "양도" || s === "양수") return "amber";
+  if (s === "양도" || s === "양수" || s === "일부양도") return "amber";
   if (s.includes("오류") || s.includes("반려") || s === "계약해지") return "red";
   if (s.includes("대기") || s.includes("보류")) return "amber";
   return "blue";
@@ -2134,7 +2135,7 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
   });
 
   const filteredRows = allowanceRows.filter((row) => {
-    if (row.status !== "정상운영") return false;
+    if (INACTIVE_STATUSES.has(row.status)) return false;
     if (!row.baseDate || !startDate || !endDate) return true;
 
     // Parse filter days
