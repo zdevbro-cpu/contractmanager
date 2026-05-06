@@ -1410,11 +1410,11 @@ function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
           <div className="pdf-empty-box">등록된 계약서 파일이 없습니다.</div>
         ) : (
           <div>
-            <table className="grid" style={{ tableLayout: "fixed", width: "100%" }}>
+            <table className="grid" style={{ tableLayout: "fixed" }}>
               <colgroup>
                 <col style={{ width: "110px" }} />
-                <col />
-                <col style={{ width: "100px" }} />
+                <col style={{ width: "360px" }} />
+                <col style={{ width: "120px" }} />
                 <col style={{ width: "70px" }} />
               </colgroup>
               <thead>
@@ -1422,11 +1422,11 @@ function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
               </thead>
             </table>
             <div style={{ maxHeight: "210px", overflowY: "auto" }}>
-              <table className="grid" style={{ tableLayout: "fixed", width: "100%" }}>
+              <table className="grid" style={{ tableLayout: "fixed" }}>
                 <colgroup>
                   <col style={{ width: "110px" }} />
-                  <col />
-                  <col style={{ width: "100px" }} />
+                  <col style={{ width: "360px" }} />
+                  <col style={{ width: "120px" }} />
                   <col style={{ width: "70px" }} />
                 </colgroup>
                 <tbody>
@@ -1434,7 +1434,7 @@ function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
                     <tr key={d.id}>
                       <td>{d.uploadedAt}</td>
                       <td style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.originalName}</td>
-                      <td>{d.reason}</td>
+                      <td style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.reason}</td>
                       <td>
                         <button className="line-btn" style={{ padding: "2px 8px" }}
                           onClick={() => window.open(`${API_BASE}/contracts/${row!.id}/documents/${d.id}/pdf`, "_blank")}>
