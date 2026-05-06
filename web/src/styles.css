@@ -209,6 +209,7 @@ button { font-family: inherit; }
 .grid { width: 100%; border-collapse: collapse; font-size: 14px; }
 .grid th, .grid td { padding: 10px; border-bottom: 1px solid #eef2f8; text-align: left; white-space: nowrap; }
 .contract-grid th, .contract-grid td { padding: 7px 10px; }
+.doc-table th, .doc-table td { padding: 10px 20px; }
 .contract-grid th { text-align: center; }
 .contract-grid th.center-th { text-align: center !important; }
 .contract-grid td { text-align: center; }
