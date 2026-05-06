@@ -991,6 +991,7 @@ function ContractList({ onCreate, onDetail, rows }: { onCreate: () => void; onDe
   const [contractFilter, setContractFilter] = useState<"전체" | "신규" | "변경">("전체");
   const selectedNoRef = useRef<string | null>(null);
   const pagedRef = useRef<ContractRowData[]>([]);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const onDetailRef = useRef(onDetail);
   onDetailRef.current = onDetail;
 
@@ -1086,9 +1087,10 @@ function ContractList({ onCreate, onDetail, rows }: { onCreate: () => void; onDe
       <PageHeader title="계약 관리" desc="계약 목록을 조회하고 관리할 수 있습니다." />
       <section className="card">
         <div className="contract-filter-bar">
-          <div className="search-box">
+          <div className="search-box" style={{ position: "relative" }}>
             <Search size={16} />
-            <input className="input-input" placeholder="계약번호, 계약자명, 추천인, 소속, 관리자 검색" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} autoFocus />
+            <input ref={searchInputRef} className="input-input" placeholder="계약번호, 계약자명, 추천인, 소속, 관리자 검색" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} autoFocus />
+            {search && <button type="button" onClick={() => { setSearch(""); setPage(1); searchInputRef.current?.focus(); }} style={{ position: "absolute", right: "8px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#aaa", padding: "2px", display: "flex", alignItems: "center" }}><X size={14} /></button>}
           </div>
           <div style={{ display: "flex", border: "1px solid #dfe6f3", borderRadius: "8px", overflow: "hidden", flexShrink: 0 }}>{(["계약일", "변경일"] as const).map((m) => (<button key={m} type="button" onClick={() => { setDateMode(m); setPage(1); }} style={{ padding: "0 12px", height: "38px", border: "none", cursor: "pointer", fontSize: "13px", fontWeight: dateMode === m ? 600 : 400, background: dateMode === m ? "#1c75ff" : "#fff", color: dateMode === m ? "#fff" : "#5e6a83", transition: "all 0.15s" }}>{m}</button>))}</div><input className="date-filter-input" type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} />
           <span className="date-sep">~</span>
@@ -1153,10 +1155,14 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
   const [referrerId, setReferrerId] = useState("");
   const [referrerSearch, setReferrerSearch] = useState("");
   const [showReferrerList, setShowReferrerList] = useState(false);
+  const [referrerHighlight, setReferrerHighlight] = useState(-1);
   const [contractorName, setContractorName] = useState("");
   const [rrn, setRrn] = useState("");
   const [phone, setPhone] = useState("");
   const [bankName, setBankName] = useState("");
+  const [bankSearch, setBankSearch] = useState("");
+  const [showBankList, setShowBankList] = useState(false);
+  const [bankHighlight, setBankHighlight] = useState(-1);
   const [accountNo, setAccountNo] = useState("");
   const [accountOwner, setAccountOwner] = useState("");
   const [accountOwnerEdited, setAccountOwnerEdited] = useState(false);
@@ -1169,6 +1175,7 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const endDate = manualEnd ? endDateOverride : addYears(contractDate, selectedType?.contractYears ?? 3);
+  const isFormFilled = !!contractorName && !!rrn && !!phone;
   const autoContractNo = `LASM-${compactDate(contractDate)}-011`;
   const contractNo = contractNoInput || autoContractNo;
 
@@ -1311,14 +1318,14 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "10px" }}>
           <label className="field">
             <span>계약명</span>
-            <select className="input-input" value={selectedType?.id ?? ""} onChange={(e) => handleTypeChange(Number(e.target.value))}>
+            <select className="input-input" tabIndex={1} value={selectedType?.id ?? ""} onChange={(e) => handleTypeChange(Number(e.target.value))}>
               {contractTypes.length === 0 && <option value="">계약서 없음 — 시스템관리에서 먼저 등록하세요</option>}
               {contractTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </label>
-          <label className="field"><span>계약번호</span><input className="input-input" value={contractNoInput} onChange={(e) => setContractNoInput(e.target.value)} placeholder={autoContractNo} /></label>
-          <label className="field"><span>관리자소속</span><input className="input-input" value={affiliation} onChange={(e) => setAffiliation(e.target.value)} placeholder="소속 입력" /></label>
-          <label className="field"><span>관리자</span><input className="input-input" value={managerName} onChange={(e) => setManagerName(e.target.value)} placeholder="관리자명 입력" /></label>
+          <label className="field"><span>계약번호</span><input className="input-input" tabIndex={2} value={contractNoInput} onChange={(e) => setContractNoInput(e.target.value)} placeholder={autoContractNo} /></label>
+          <label className="field"><span>관리자소속</span><input className="input-input" tabIndex={3} value={affiliation} onChange={(e) => setAffiliation(e.target.value)} placeholder="소속 입력" /></label>
+          <label className="field"><span>관리자</span><input className="input-input" tabIndex={4} value={managerName} onChange={(e) => setManagerName(e.target.value)} placeholder="관리자명 입력" /></label>
         </div>
       </section>
 
@@ -1327,7 +1334,7 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
           <div className="card-title-sm">계약정보</div>
           <label className="switch-row">
             <span>근무여부</span>
-            <select className="input-input work-type-select" value={workType} onChange={(e) => { setWorkType(e.target.value as "4일" | "2일" | "미근무"); setManualAllowance(false); }}>
+            <select className="input-input work-type-select" tabIndex={5} value={workType} onChange={(e) => { setWorkType(e.target.value as "4일" | "2일" | "미근무"); setManualAllowance(false); }}>
               <option value="4일">4일근무</option>
               <option value="2일">2일근무</option>
               <option value="미근무">미근무</option>
@@ -1339,17 +1346,29 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
             <span>추천인명</span>
             <input
               className="input-input"
+              tabIndex={6}
               placeholder="이름 검색 또는 선택"
               value={referrerSearch}
               autoComplete="off"
               onFocus={() => setShowReferrerList(true)}
-              onBlur={() => setTimeout(() => setShowReferrerList(false), 150)}
+              onBlur={() => setTimeout(() => { setShowReferrerList(false); setReferrerHighlight(-1); }, 150)}
               onChange={(e) => {
                 const val = e.target.value;
                 setReferrerSearch(val);
                 setShowReferrerList(true);
+                setReferrerHighlight(-1);
                 const found = referrers.find(r => r.name === val);
                 setReferrerId(found ? String(found.id) : "");
+              }}
+              onKeyDown={(e) => {
+                const matches = [...referrers].filter(r => !referrerSearch || r.name.includes(referrerSearch)).sort((a, b) => a.name.localeCompare(b.name, "ko"));
+                if (e.key === "ArrowDown") { e.preventDefault(); setReferrerHighlight(h => Math.min(h + 1, matches.length - 1)); setShowReferrerList(true); }
+                else if (e.key === "ArrowUp") { e.preventDefault(); setReferrerHighlight(h => Math.max(h - 1, -1)); }
+                else if (e.key === "Enter") {
+                  e.preventDefault();
+                  const target = referrerHighlight >= 0 ? matches[referrerHighlight] : matches[0];
+                  if (target) { setReferrerSearch(target.name); setReferrerId(String(target.id)); setShowReferrerList(false); setReferrerHighlight(-1); }
+                } else if (e.key === "Escape") { setShowReferrerList(false); setReferrerHighlight(-1); }
               }}
             />
             {showReferrerList && (
@@ -1363,42 +1382,43 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
                 {[...referrers]
                   .filter(r => !referrerSearch || r.name.includes(referrerSearch))
                   .sort((a, b) => a.name.localeCompare(b.name, "ko"))
-                  .map(r => (
+                  .map((r, idx) => (
                     <li key={r.id}
-                      style={{ padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}
-                      onMouseEnter={e => (e.currentTarget.style.background = "#f0f0f0")}
-                      onMouseLeave={e => (e.currentTarget.style.background = "")}
+                      style={{ padding: "6px 10px", cursor: "pointer", fontSize: "13px", background: idx === referrerHighlight ? "#1c75ff" : "", color: idx === referrerHighlight ? "#fff" : "" }}
+                      onMouseEnter={e => { if (idx !== referrerHighlight) e.currentTarget.style.background = "#f0f0f0"; }}
+                      onMouseLeave={e => { if (idx !== referrerHighlight) e.currentTarget.style.background = ""; }}
                       onMouseDown={() => {
                         setReferrerSearch(r.name);
                         setReferrerId(String(r.id));
                         setShowReferrerList(false);
+                        setReferrerHighlight(-1);
                       }}
                     >{r.name}</li>
                   ))}
               </ul>
             )}
           </label>
-          <label className="field"><span>계약자명</span><input className="input-input" placeholder="계약자명" value={contractorName} onChange={(e) => { setContractorName(e.target.value); if (!accountOwnerEdited) setAccountOwner(e.target.value); }} /></label>
-          <label className="field"><span>주민번호</span><input className="input-input" placeholder="000000-0000000" value={rrn} onChange={(e) => setRrn(rrnFmt(e.target.value))} maxLength={14} /></label>
-          <label className="field"><span>연락처</span><input className="input-input" placeholder="010-0000-0000" value={phone} onChange={(e) => setPhone(phoneFmt(e.target.value))} maxLength={13} /></label>
+          <label className="field"><span>계약자명</span><input className="input-input" tabIndex={7} placeholder="계약자명" value={contractorName} onChange={(e) => { setContractorName(e.target.value); if (!accountOwnerEdited) setAccountOwner(e.target.value); }} /></label>
+          <label className="field"><span>주민번호</span><input className="input-input" tabIndex={13} placeholder="000000-0000000" value={rrn} onChange={(e) => setRrn(rrnFmt(e.target.value))} maxLength={14} /></label>
+          <label className="field"><span>연락처</span><input className="input-input" tabIndex={14} placeholder="010-0000-0000" value={phone} onChange={(e) => setPhone(phoneFmt(e.target.value))} maxLength={13} /></label>
         </div>
         <div className="contract-info-row create-row">
           <label className="field">
             <span>보증금(원)</span>
-            <input className="input-input" placeholder="0" value={deposit} onChange={(e) => { setDeposit(numFmt(e.target.value)); setManualAllowance(false); }} />
+            <input className="input-input" tabIndex={8} placeholder="0" value={deposit} onChange={(e) => { setDeposit(numFmt(e.target.value)); setManualAllowance(false); }} />
           </label>
           <label className="field">
             <span>수당(원)</span>
-            <input className="input-input" placeholder="0" value={allowance} onChange={(e) => { setAllowance(numFmt(e.target.value)); setManualAllowance(true); }} />
+            <input className="input-input" tabIndex={9} placeholder="0" value={allowance} onChange={(e) => { setAllowance(numFmt(e.target.value)); setManualAllowance(true); }} />
           </label>
-          <label className="field"><span>계약일</span><input className="input-input" type="date" value={contractDate} onChange={(e) => handleContractDate(e.target.value)} /></label>
+          <label className="field"><span>계약일</span><input className="input-input" tabIndex={10} type="date" value={contractDate} onChange={(e) => handleContractDate(e.target.value)} /></label>
           <label className="field">
             <span>수당지급일</span>
-            <input className="input-input" type="date" value={payoutDate} onChange={(e) => { setManualPayout(true); setPayoutDate(e.target.value); }} />
+            <input className="input-input" tabIndex={11} type="date" value={payoutDate} onChange={(e) => { setManualPayout(true); setPayoutDate(e.target.value); }} />
           </label>
           <label className="field">
             <span>계약종료일</span>
-            <input className="input-input" type="date" value={endDate} onChange={(e) => { setManualEnd(true); setEndDateOverride(e.target.value); }} />
+            <input className="input-input" tabIndex={12} type="date" value={endDate} onChange={(e) => { setManualEnd(true); setEndDateOverride(e.target.value); }} />
           </label>
         </div>
       </section>
@@ -1406,34 +1426,62 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
       <section className="card">
         <div className="card-title-sm">계좌정보</div>
         <div className="account-inline">
-          <select className="input-input" value={bankName} onChange={(e) => setBankName(e.target.value)}>
-            <option value="">-- 은행/기관 선택 --</option>
-            {BANKS.map((b) => <option key={b} value={b}>{b}</option>)}
-          </select>
-          <input className="input-input" placeholder="계좌번호" value={accountNo} onChange={(e) => setAccountNo(e.target.value)} />
-          <input className="input-input" placeholder="예금주" value={accountOwner} onChange={(e) => { setAccountOwnerEdited(true); setAccountOwner(e.target.value); }} />
+          <div style={{ position: "relative" }}>
+            <input
+              className="input-input"
+              tabIndex={15}
+              placeholder="은행/기관 검색 또는 입력"
+              value={bankSearch}
+              autoComplete="off"
+              onFocus={() => { setBankSearch(bankName); setShowBankList(true); }}
+              onBlur={() => setTimeout(() => { setShowBankList(false); setBankHighlight(-1); if (!BANKS.includes(bankSearch)) setBankSearch(bankName); }, 150)}
+              onChange={(e) => { setBankSearch(e.target.value); setBankName(""); setShowBankList(true); setBankHighlight(-1); }}
+              onKeyDown={(e) => {
+                const matches = BANKS.filter(b => !bankSearch || b.includes(bankSearch));
+                if (e.key === "ArrowDown") { e.preventDefault(); setBankHighlight(h => Math.min(h + 1, matches.length - 1)); setShowBankList(true); }
+                else if (e.key === "ArrowUp") { e.preventDefault(); setBankHighlight(h => Math.max(h - 1, -1)); }
+                else if (e.key === "Enter") {
+                  e.preventDefault();
+                  const target = bankHighlight >= 0 ? matches[bankHighlight] : matches[0];
+                  if (target) { setBankName(target); setBankSearch(target); setShowBankList(false); setBankHighlight(-1); }
+                } else if (e.key === "Escape") { setShowBankList(false); setBankHighlight(-1); }
+              }}
+            />
+            {showBankList && (
+              <ul style={{ position: "absolute", top: "100%", left: 0, right: 0, maxHeight: "180px", overflowY: "auto", background: "#fff", border: "1px solid #ccc", borderRadius: "4px", margin: 0, padding: 0, listStyle: "none", zIndex: 999, boxShadow: "0 2px 6px rgba(0,0,0,0.15)" }}>
+                {BANKS.filter(b => !bankSearch || b.includes(bankSearch)).map((b, idx) => (
+                  <li key={b}
+                    style={{ padding: "6px 10px", cursor: "pointer", fontSize: "13px", background: idx === bankHighlight ? "#1c75ff" : "", color: idx === bankHighlight ? "#fff" : "" }}
+                    onMouseEnter={e => { if (idx !== bankHighlight) e.currentTarget.style.background = "#f0f0f0"; }}
+                    onMouseLeave={e => { if (idx !== bankHighlight) e.currentTarget.style.background = ""; }}
+                    onMouseDown={() => { setBankName(b); setBankSearch(b); setShowBankList(false); setBankHighlight(-1); }}>
+                    {b}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <input className="input-input" tabIndex={16} placeholder="계좌번호" value={accountNo} onChange={(e) => setAccountNo(e.target.value)} />
+          <input className="input-input" tabIndex={17} placeholder="예금주" value={accountOwner} onChange={(e) => { setAccountOwnerEdited(true); setAccountOwner(e.target.value); }} />
           <button className="primary-btn action-btn" onClick={downloadAccountVerification}>계좌확인생성</button>
         </div>
       </section>
 
       <section className="card">
         <div className="card-title-sm">첨부파일</div>
-        <div className="form-grid">
-          <label className="field">
-            <span>첨부파일(계약서, 입금증, 신분증 포함)</span>
-            <div className="dropzone"
-              onClick={() => fileInputRef.current?.click()}
-              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
-              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-              onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); }}
-              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const f = e.dataTransfer.files?.[0]; if (f) setUploadFile(f); }}
-              style={{ cursor: "pointer" }}>
-              {uploadFile ? uploadFile.name : "파일을 드래그하거나 클릭하여 업로드하세요"}
-            </div>
-            <input ref={fileInputRef} type="file" accept=".pdf,application/pdf,image/*" hidden
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) setUploadFile(f); }} />
-          </label>
+        <div className="dropzone"
+          tabIndex={18}
+          onClick={() => fileInputRef.current?.click()}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInputRef.current?.click(); } }}
+          onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const f = e.dataTransfer.files?.[0]; if (f) setUploadFile(f); }}
+          style={{ cursor: "pointer", minHeight: "120px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px", ...(isFormFilled && !uploadFile ? { border: "2px dashed #1c75ff", background: "#f0f6ff", boxShadow: "0 0 0 3px rgba(28,117,255,0.15)", color: "#1c75ff", fontWeight: 600 } : {}) }}>
+          {uploadFile ? uploadFile.name : isFormFilled ? "첨부파일을 업로드하세요 (클릭 또는 드래그)" : "파일을 드래그하거나 클릭하여 업로드하세요"}
         </div>
+        <input ref={fileInputRef} type="file" accept=".pdf,application/pdf,image/*" hidden
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) setUploadFile(f); }} />
       </section>
 
       <div className="actions contract-create-actions">
