@@ -2,6 +2,10 @@ const express = require("express");
 const { onRequest } = require("firebase-functions/v2/https");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const pg = require("pg");
+const admin = require("firebase-admin");
+
+if (!admin.apps.length) admin.initializeApp();
+const bucket = admin.storage().bucket("contractmanager-pdf-storage");
 
 const { Pool } = pg;
 
@@ -104,6 +108,9 @@ async function ensureAppSchema() {
   await safeAlter("alter table contracts add column if not exists work_start_date date");
   await safeAlter("alter table contracts add column if not exists report_start_date date");
   await safeAlter("alter table contracts add column if not exists position varchar(50)");
+  await safeAlter("alter table contracts add column if not exists pdf_storage_path text");
+  await safeAlter("alter table contract_documents add column if not exists original_name text");
+  await safeAlter("alter table contract_documents add column if not exists reason text");
   await pool.query(`
     create table if not exists contract_types (
       id bigserial primary key,
@@ -403,22 +410,41 @@ app.post("/contracts/:id/history", async (req, res) => {
 app.get("/contracts/:id/pdf", async (req, res) => {
   const { id } = req.params;
   try {
-    const result = await pool.query("select contractor_name, first_allowance_date from contracts where id = $1", [id]);
+    const result = await pool.query("select contractor_name, pdf_storage_path from contracts where id = $1", [id]);
     if (result.rowCount === 0) return res.status(404).send("Contract not found in database");
-    
-    const { contractor_name, first_allowance_date } = result.rows[0];
-    if (!contractor_name) return res.status(400).send("Contractor name is missing");
 
+    const { contractor_name, pdf_storage_path } = result.rows[0];
+
+    // contract_documents에서 최신 파일 조회
+    const docResult = await pool.query(
+      "select storage_path from contract_documents where contract_id = $1 order by created_at desc limit 1",
+      [id]
+    );
+    if (docResult.rowCount > 0) {
+      const file = bucket.file(docResult.rows[0].storage_path);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", "inline");
+      return file.createReadStream()
+        .on("error", (err) => res.status(500).send(String(err)))
+        .pipe(res);
+    }
+
+    // 레거시 fallback: pdf_storage_path 직접 사용
+    if (pdf_storage_path) {
+      const file = bucket.file(pdf_storage_path);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", "inline");
+      return file.createReadStream()
+        .on("error", (err) => res.status(500).send(String(err)))
+        .pipe(res);
+    }
+
+    // 없으면 계약자명으로 로컬 파일 검색 (레거시 fallback)
     const fs = require("fs");
     const path = require("path");
-    
-    // Path must be relative to this file in the functions directory
     const dataRoot = path.join(__dirname, "data");
-    const cleanName = contractor_name.trim();
-    
-    let filePath = null;
+    const cleanName = (contractor_name || "").trim();
 
-    // Recursive search in all subdirectories of data
     function findFileRecursive(dir) {
       if (!fs.existsSync(dir)) return null;
       const items = fs.readdirSync(dir);
@@ -435,16 +461,110 @@ app.get("/contracts/:id/pdf", async (req, res) => {
       return null;
     }
 
-    filePath = findFileRecursive(dataRoot);
-    
-    if (!filePath) {
-      return res.status(404).send(`PDF file not found for contractor [${cleanName}] in server storage.`);
-    }
-    
+    const filePath = findFileRecursive(dataRoot);
+    if (!filePath) return res.status(404).send(`PDF file not found for contractor [${cleanName}]`);
+
     res.setHeader("Content-Type", "application/pdf");
     res.sendFile(filePath);
   } catch (error) {
     res.status(500).send(String(error));
+  }
+});
+
+app.post("/contracts/:id/pdf", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query("select contractor_name from contracts where id = $1", [id]);
+    if (result.rowCount === 0) return res.status(404).send("Contract not found");
+
+    const Busboy = require("busboy");
+    const busboy = Busboy({ headers: req.headers });
+    let uploadPromise = null;
+    let storagePath = null;
+    let originalName = null;
+    let reason = "";
+
+    busboy.on("field", (name, val) => {
+      if (name === "reason") reason = val;
+    });
+
+    busboy.on("file", (_fieldname, fileStream, info) => {
+      const { filename, mimeType } = info;
+      originalName = filename;
+      storagePath = `contracts/${id}/${Date.now()}_${filename.replace(/[^a-zA-Z0-9가-힣._-]/g, "_")}`;
+      const file = bucket.file(storagePath);
+      const writeStream = file.createWriteStream({ metadata: { contentType: mimeType || "application/pdf" } });
+      fileStream.pipe(writeStream);
+      uploadPromise = new Promise((resolve, reject) => {
+        writeStream.on("finish", resolve);
+        writeStream.on("error", reject);
+      });
+    });
+
+    busboy.on("finish", async () => {
+      try {
+        if (!uploadPromise) return res.status(400).json({ ok: false, message: "파일 없음" });
+        await uploadPromise;
+        await pool.query(
+          "insert into contract_documents (contract_id, storage_path, original_file_name, original_name, file_type, reason) values ($1, $2, $3, $3, 'CONTRACT_PDF', $4)",
+          [id, storagePath, originalName, reason || "파일등록"]
+        );
+        res.json({ ok: true, path: storagePath });
+      } catch (err) {
+        res.status(500).json({ ok: false, message: String(err) });
+      }
+    });
+
+    busboy.on("error", (err) => res.status(500).json({ ok: false, message: String(err) }));
+    req.pipe(busboy);
+  } catch (error) {
+    res.status(500).json({ ok: false, message: String(error) });
+  }
+});
+
+app.get("/contracts/:id/documents", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      "select id, storage_path, coalesce(original_name, original_file_name) as original_name, reason, created_at from contract_documents where contract_id = $1 order by created_at desc",
+      [id]
+    );
+    res.json({
+      rows: result.rows.map((r) => ({
+        id: r.id,
+        storagePath: r.storage_path,
+        originalName: r.original_name || r.storage_path.split("/").pop(),
+        reason: r.reason || "",
+        uploadedAt: r.created_at ? toIsoDate(r.created_at) : ""
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: String(error) });
+  }
+});
+
+app.get("/contracts/:id/documents/:docId/pdf", async (req, res) => {
+  const { docId } = req.params;
+  try {
+    const result = await pool.query("select storage_path from contract_documents where id = $1", [docId]);
+    if (result.rowCount === 0) return res.status(404).send("Document not found");
+    const file = bucket.file(result.rows[0].storage_path);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", "inline");
+    file.createReadStream().on("error", (err) => res.status(500).send(String(err))).pipe(res);
+  } catch (error) {
+    res.status(500).send(String(error));
+  }
+});
+
+app.patch("/contracts/:id/pdf-path", async (req, res) => {
+  const { id } = req.params;
+  const { pdfStoragePath } = req.body;
+  try {
+    await pool.query("update contracts set pdf_storage_path = $1 where id = $2", [pdfStoragePath, id]);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: String(error) });
   }
 });
 

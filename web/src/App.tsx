@@ -19,7 +19,7 @@ import {
   Wallet,
   X
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ChangeEvent, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type Dispatch, type SetStateAction } from "react";
 
 type ContractRowData = {
   id: number;
@@ -1192,28 +1192,52 @@ function DetailBasicTab({ row }: { row: ContractRowData | null }) {
     </section>
   );
 }
-function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
-  const pdfLabel = row ? `${row.type}_${row.contractDate}_${row.name}.pdf` : "";
+function DetailDocumentTab({ row, onOpenChange }: { row: ContractRowData | null; onOpenChange: () => void }) {
+  const [docs, setDocs] = useState<Array<{ id: number; originalName: string; reason: string; uploadedAt: string }>>([]);
+
+  useEffect(() => {
+    if (!row?.id) return;
+    fetch(`${API_BASE}/contracts/${row.id}/documents`)
+      .then((r) => r.json())
+      .then((data) => setDocs(data.rows || []))
+      .catch(() => {});
+  }, [row?.id]);
+
   return (
     <section className="card">
       <div className="card-title-sm">계약서 (입금표/신분증 포함)</div>
       <div className="card">
-        <div className="pdf-filename">{pdfLabel || "파일 미등록"}</div>
-        {!pdfLabel ? (
+        {docs.length === 0 ? (
           <div className="pdf-empty-box">등록된 계약서 파일이 없습니다.</div>
         ) : (
-          <div className="pdf-preview-placeholder">
-            <FileText size={48} strokeWidth={1} />
-            <p>PDF 파일을 확인하려면 아래 버튼을 클릭하세요.</p>
-          </div>
+          <table className="grid">
+            <thead>
+              <tr><th>업로드일</th><th>파일명</th><th>사유</th><th>보기</th></tr>
+            </thead>
+            <tbody>
+              {docs.map((d) => (
+                <tr key={d.id}>
+                  <td>{d.uploadedAt}</td>
+                  <td>{d.originalName}</td>
+                  <td>{d.reason}</td>
+                  <td>
+                    <button className="line-btn" style={{ padding: "2px 8px" }}
+                      onClick={() => window.open(`${API_BASE}/contracts/${row!.id}/documents/${d.id}/pdf`, "_blank")}>
+                      보기
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
-        <div className="actions detail-file-actions">
-          <button className="primary-btn" onClick={() => {
-            if (!row?.id) return;
-            const url = `${API_BASE}/contracts/${row.id}/pdf`;
-            window.open(url, "_blank");
-          }}>계약서 보기</button>
-          <button className="line-btn">파일 업로드/변경</button>
+        <div className="actions detail-file-actions" style={{ marginTop: "12px" }}>
+          {docs.length > 0 && (
+            <button className="primary-btn" onClick={() => window.open(`${API_BASE}/contracts/${row!.id}/pdf`, "_blank")}>
+              계약내용보기
+            </button>
+          )}
+          <button className="line-btn" onClick={onOpenChange}>계약변경</button>
         </div>
       </div>
     </section>
@@ -2700,6 +2724,8 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
   const [tab, setTab] = useState<DetailTab>("basic");
   const [changeOpen, setChangeOpen] = useState(false);
   const [changeMemo, setChangeMemo] = useState("");
+  const [changeFile, setChangeFile] = useState<File | null>(null);
+  const changeFileRef = useRef<HTMLInputElement>(null);
   const [changeHistoryRows, setChangeHistoryRows] = useState<Array<{ at: string; before: string; after: string; reason: string; changedFields: Array<{ field: string; before: string; after: string }> }>>([]);
   
   useEffect(() => {
@@ -2788,6 +2814,15 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
           body: JSON.stringify(updateBody)
         });
 
+        if (changeFile && row?.id) {
+          const formData = new FormData();
+          formData.append("file", changeFile);
+          formData.append("reason", changeMemo || "변경관리");
+          await fetch(`${API_BASE}/contracts/${row.id}/pdf`, { method: "POST", body: formData });
+          setChangeFile(null);
+          if (changeFileRef.current) changeFileRef.current.value = "";
+        }
+
         if (histRes.ok && updateRes.ok) {
           alert("변경사항이 저장되었습니다.");
           setChangeHistoryRows((prev) => [{ at, before: beforeText, after: afterText, reason: changeMemo || "-", requester: authUser?.email || "관리자", changedFields: changed }, ...prev]);
@@ -2824,12 +2859,12 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
   };
 
   const tabs: { key: DetailTab; label: string }[] = [{ key: "basic", label: "기본정보" }, { key: "document", label: "계약서" }, { key: "allowance", label: "수당정보" }, { key: "account", label: "계좌정보" }, { key: "history", label: "변경이력" }, { key: "memo", label: "메모" }];
-  const tabContent = tab === "basic" ? <DetailBasicTab row={row} /> : tab === "document" ? <DetailDocumentTab row={row} /> : tab === "allowance" ? <DetailAllowanceTab /> : tab === "account" ? <DetailAccountTab row={row} /> : tab === "history" ? <DetailHistoryTab rows={changeHistoryRows} onOpenDetail={(r) => { setSelectedHistory(r); setHistoryDetailOpen(true); }} /> : <DetailMemoTab row={row} onRefresh={() => {
+  const tabContent = tab === "basic" ? <DetailBasicTab row={row} /> : tab === "document" ? <DetailDocumentTab row={row} onOpenChange={() => setChangeOpen(true)} /> : tab === "allowance" ? <DetailAllowanceTab /> : tab === "account" ? <DetailAccountTab row={row} /> : tab === "history" ? <DetailHistoryTab rows={changeHistoryRows} onOpenDetail={(r) => { setSelectedHistory(r); setHistoryDetailOpen(true); }} /> : <DetailMemoTab row={row} onRefresh={() => {
     // Re-fetch logic if needed, but row is passed from parent.
     // For now, we assume parent state handles it or we could add a refetch here.
     onBack(); // Go back to list to refresh or we can add a specific fetchRow here.
   }} />;
-  return <div><div className="head-with-btn"><PageHeader title="계약 상세" desc="계약 정보를 확인하고 관리하세요." /><div className="actions"><button className="line-btn" onClick={() => setChangeOpen(true)}>변경관리</button><button className="line-btn" onClick={onBack}>목록으로</button></div></div><section className="card summary-row"><div><div className="meta-label">계약번호</div><div className="meta-value">{row?.no ?? "-"}</div></div><div><div className="meta-label">계약자</div><div className="meta-value">{row?.name ?? "-"}</div></div><div><div className="meta-label">계약상태</div><div className="meta-value"><span className="badge green">{row?.status ?? "정상운영"}</span></div></div><div><div className="meta-label">계약일자</div><div className="meta-value">{row?.contractDate ?? "-"}</div></div><div><div className="meta-label">계약종료일</div><div className="meta-value">{row?.endDate ?? "-"}</div></div></section><div className="tabs">{tabs.map((t) => <button key={t.key} className={tab === t.key ? "tab active" : "tab"} onClick={() => setTab(t.key)}>{t.label}</button>)}</div>{tabContent}
+  return <div><div className="head-with-btn"><PageHeader title="계약 상세" desc="계약 정보를 확인하고 관리하세요." /><div className="actions"><button className="line-btn" onClick={onBack}>목록으로</button></div></div><section className="card summary-row"><div><div className="meta-label">계약번호</div><div className="meta-value">{row?.no ?? "-"}</div></div><div><div className="meta-label">계약자</div><div className="meta-value">{row?.name ?? "-"}</div></div><div><div className="meta-label">계약상태</div><div className="meta-value"><span className="badge green">{row?.status ?? "정상운영"}</span></div></div><div><div className="meta-label">계약일자</div><div className="meta-value">{row?.contractDate ?? "-"}</div></div><div><div className="meta-label">계약종료일</div><div className="meta-value">{row?.endDate ?? "-"}</div></div></section><div className="tabs">{tabs.map((t) => <button key={t.key} className={tab === t.key ? "tab active" : "tab"} onClick={() => setTab(t.key)}>{t.label}</button>)}</div>{tabContent}
   {changeOpen && (
     <div className="modal-backdrop" onClick={() => setChangeOpen(false)}>
       <section className="modal-card" onClick={(e) => e.stopPropagation()}>
@@ -2869,18 +2904,31 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
             <tr>
               <th>요청 사유</th>
               <td colSpan={2}>
-                <textarea 
-                  className="cell-input" 
+                <textarea
+                  className="cell-input"
                   style={{ height: "80px", padding: "8px", resize: "vertical" }}
-                  value={changeMemo} 
-                  onChange={(e) => setChangeMemo(e.target.value)} 
+                  value={changeMemo}
+                  onChange={(e) => setChangeMemo(e.target.value)}
                 />
+              </td>
+            </tr>
+            <tr>
+              <th>계약서 파일</th>
+              <td colSpan={2}>
+                <input ref={changeFileRef} type="file" accept=".pdf,application/pdf" hidden
+                  onChange={(e) => setChangeFile(e.target.files?.[0] || null)} />
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <button className="line-btn" type="button" onClick={() => changeFileRef.current?.click()}>파일 선택</button>
+                  <span style={{ fontSize: "13px", color: changeFile ? "#333" : "#999" }}>
+                    {changeFile ? changeFile.name : "선택된 파일 없음 (선택사항)"}
+                  </span>
+                </div>
               </td>
             </tr>
           </tfoot>
         </table>
         <div className="actions modal-actions">
-          <button className="line-btn" onClick={() => setChangeOpen(false)}>취소</button>
+          <button className="line-btn" onClick={() => { setChangeOpen(false); setChangeFile(null); if (changeFileRef.current) changeFileRef.current.value = ""; }}>취소</button>
           <button className="primary-btn" onClick={() => void saveChangeRequest()}>저장</button>
         </div>
       </section>
