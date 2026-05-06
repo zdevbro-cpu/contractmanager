@@ -1409,43 +1409,33 @@ function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
         {docs.length === 0 ? (
           <div className="pdf-empty-box">등록된 계약서 파일이 없습니다.</div>
         ) : (
-          <div>
-            <table className="grid" style={{ tableLayout: "fixed" }}>
+          <div style={{ maxHeight: "210px", overflowY: "auto" }}>
+            <table className="grid" style={{ tableLayout: "fixed", width: "100%" }}>
               <colgroup>
                 <col style={{ width: "110px" }} />
                 <col style={{ width: "240px" }} />
                 <col style={{ width: "120px" }} />
                 <col style={{ width: "70px" }} />
               </colgroup>
-              <thead>
+              <thead style={{ position: "sticky", top: 0, background: "#f8fafc", zIndex: 1 }}>
                 <tr><th>업로드일</th><th>파일명</th><th>사유</th><th>보기</th></tr>
               </thead>
+              <tbody>
+                {docs.map((d) => (
+                  <tr key={d.id}>
+                    <td>{d.uploadedAt}</td>
+                    <td style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.originalName}</td>
+                    <td style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.reason}</td>
+                    <td>
+                      <button className="line-btn" style={{ padding: "2px 8px" }}
+                        onClick={() => window.open(`${API_BASE}/contracts/${row!.id}/documents/${d.id}/pdf`, "_blank")}>
+                        보기
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
             </table>
-            <div style={{ maxHeight: "210px", overflowY: "auto" }}>
-              <table className="grid" style={{ tableLayout: "fixed" }}>
-                <colgroup>
-                  <col style={{ width: "110px" }} />
-                  <col style={{ width: "240px" }} />
-                  <col style={{ width: "120px" }} />
-                  <col style={{ width: "70px" }} />
-                </colgroup>
-                <tbody>
-                  {docs.map((d) => (
-                    <tr key={d.id}>
-                      <td>{d.uploadedAt}</td>
-                      <td style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.originalName}</td>
-                      <td style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.reason}</td>
-                      <td>
-                        <button className="line-btn" style={{ padding: "2px 8px" }}
-                          onClick={() => window.open(`${API_BASE}/contracts/${row!.id}/documents/${d.id}/pdf`, "_blank")}>
-                          보기
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           </div>
         )}
         <div className="actions detail-file-actions" style={{ marginTop: "12px" }}>
