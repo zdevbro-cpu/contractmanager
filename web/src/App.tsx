@@ -52,7 +52,7 @@ type ContractRowData = {
 
 type MenuKey = "dashboard" | "contracts" | "appointment" | "referrers" | "allowances" | "salaries" | "account" | "changes" | "system" | "none";
 type ContractView = "list" | "create" | "detail";
-type DetailTab = "basic" | "document" | "allowance" | "account" | "history" | "memo";
+type DetailTab = "basic" | "document" | "change" | "history";
 type UserAccount = { id: number; email: string; role: "시스템관리자" | "운영자"; state: "활성" | "비활성"; password: string };
 type ContractTypeRule = { id: number; deposit: number; workAmount4: number; workAmount2: number; nonWorkAmount: number };
 type ContractTypeRow = { id: number; name: string; contractYears: number; payoutMonths: number; rules: ContractTypeRule[] };
@@ -1180,19 +1180,31 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
 
 function DetailBasicTab({ row }: { row: ContractRowData | null }) {
   return (
-    <section className="card">
-      <div className="card-title-sm">기본정보</div>
-      <table className="grid"><tbody>
-        <tr><th>계약번호</th><td>{row?.no ?? "-"}</td><th>계약일</th><td>{row?.contractDate ?? "-"}</td></tr>
-        <tr><th>계약종류</th><td>{row?.type ?? "-"}</td><th>계약종료일</th><td>{row?.endDate ?? "-"}</td></tr>
-        <tr><th>계약자명</th><td>{row?.name ?? "-"}</td><th>{row?.isAppointment ? "연봉" : "보증금"}</th><td>{row?.depositAmount || "-"}</td></tr>
-        <tr><th>주민번호</th><td>{row?.residentRegistrationNumber || "-"}</td><th>{row?.isAppointment ? "급여일" : "첫수당지급일"}</th><td>{row?.payoutDate ?? "-"}</td></tr>
-        <tr><th>연락처</th><td>{row?.phone || "-"}</td><th>계약상태</th><td>{row?.status ?? "정상운영"}</td></tr>
-      </tbody></table>
-    </section>
+    <>
+      <section className="card">
+        <div className="card-title-sm">기본정보</div>
+        <table className="grid"><tbody>
+          <tr><th>계약번호</th><td>{row?.no ?? "-"}</td><th>계약일</th><td>{row?.contractDate ?? "-"}</td></tr>
+          <tr><th>계약종류</th><td>{row?.type ?? "-"}</td><th>계약종료일</th><td>{row?.endDate ?? "-"}</td></tr>
+          <tr><th>계약자명</th><td>{row?.name ?? "-"}</td><th>{row?.isAppointment ? "연봉" : "보증금"}</th><td>{row?.depositAmount || "-"}</td></tr>
+          <tr><th>주민번호</th><td>{row?.residentRegistrationNumber || "-"}</td><th>{row?.isAppointment ? "급여일" : "첫수당지급일"}</th><td>{row?.payoutDate ?? "-"}</td></tr>
+          <tr><th>연락처</th><td>{row?.phone || "-"}</td><th>계약상태</th><td>{row?.status ?? "정상운영"}</td></tr>
+        </tbody></table>
+      </section>
+      <section className="card" style={{ marginTop: "12px" }}>
+        <div className="card-title-sm">계좌정보</div>
+        <table className="grid"><tbody>
+          <tr>
+            <th>은행명</th><td>{row?.bankName || "-"}</td>
+            <th>계좌번호</th><td>{row?.accountNo || "-"}</td>
+            <th>예금주</th><td>{row?.accountHolder || "-"}</td>
+          </tr>
+        </tbody></table>
+      </section>
+    </>
   );
 }
-function DetailDocumentTab({ row, onOpenChange }: { row: ContractRowData | null; onOpenChange: () => void }) {
+function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
   const [docs, setDocs] = useState<Array<{ id: number; originalName: string; reason: string; uploadedAt: string }>>([]);
 
   useEffect(() => {
@@ -1234,28 +1246,11 @@ function DetailDocumentTab({ row, onOpenChange }: { row: ContractRowData | null;
         <div className="actions detail-file-actions" style={{ marginTop: "12px" }}>
           {docs.length > 0 && (
             <button className="primary-btn" onClick={() => window.open(`${API_BASE}/contracts/${row!.id}/pdf`, "_blank")}>
-              계약내용보기
+              계약서보기
             </button>
           )}
-          <button className="line-btn" onClick={onOpenChange}>계약변경</button>
         </div>
       </div>
-    </section>
-  );
-}
-function DetailAllowanceTab() { return <section className="card"><div className="card-title-sm">수당정보</div><table className="grid"><thead><tr><th>기준월</th><th>산정수당</th><th>공제</th><th>실지급예정금액</th><th>지급상태</th></tr></thead><tbody><tr><td colSpan={5}>수당 정보가 없습니다.</td></tr></tbody></table></section>; }
-function DetailAccountTab({ row }: { row: ContractRowData | null }) {
-  return (
-    <section className="card">
-      <div className="card-title-sm">현재 계좌 정보</div>
-      <table className="grid">
-        <tbody>
-          <tr><th>은행명</th><td>{row?.bankName || "-"}</td></tr>
-          <tr><th>계좌번호</th><td>{row?.accountNo || "-"}</td></tr>
-          <tr><th>예금주명</th><td>{row?.accountHolder || "-"}</td></tr>
-          <tr><th>계좌실명조회 상태</th><td><span className={`badge ${row?.verify === "검증완료" ? "green" : "red"}`}>{row?.verify || "미검증"}</span></td></tr>
-        </tbody>
-      </table>
     </section>
   );
 }
@@ -2754,7 +2749,7 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
       { field: isAppt ? "연봉" : "보증금", before: fmtAmt(r?.depositAmount), after: fmtAmt(r?.depositAmount) },
       { field: isAppt ? "활동비" : "수당", before: fmtAmt(r?.allowanceAmount), after: fmtAmt(r?.allowanceAmount) },
       ...(isAppt ? [{ field: "소득구분", before: r?.insuranceType || "사업소득", after: r?.insuranceType || "사업소득" }] : []),
-      { field: "근무여부", before: "근무", after: "근무" },
+      { field: "근무여부", before: "4일근무", after: "4일근무" },
       { field: "연락처", before: r?.phone || "-", after: r?.phone || "-" },
       { field: "주민번호", before: r?.residentRegistrationNumber || "-", after: r?.residentRegistrationNumber || "-" },
       { field: "은행명", before: r?.bankName || "-", after: r?.bankName || "-" },
@@ -2854,86 +2849,80 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
       }
     }
     
-    setChangeOpen(false);
     setTab("history");
   };
 
-  const tabs: { key: DetailTab; label: string }[] = [{ key: "basic", label: "기본정보" }, { key: "document", label: "계약서" }, { key: "allowance", label: "수당정보" }, { key: "account", label: "계좌정보" }, { key: "history", label: "변경이력" }, { key: "memo", label: "메모" }];
-  const tabContent = tab === "basic" ? <DetailBasicTab row={row} /> : tab === "document" ? <DetailDocumentTab row={row} onOpenChange={() => setChangeOpen(true)} /> : tab === "allowance" ? <DetailAllowanceTab /> : tab === "account" ? <DetailAccountTab row={row} /> : tab === "history" ? <DetailHistoryTab rows={changeHistoryRows} onOpenDetail={(r) => { setSelectedHistory(r); setHistoryDetailOpen(true); }} /> : <DetailMemoTab row={row} onRefresh={() => {
-    // Re-fetch logic if needed, but row is passed from parent.
-    // For now, we assume parent state handles it or we could add a refetch here.
-    onBack(); // Go back to list to refresh or we can add a specific fetchRow here.
-  }} />;
+  const changeTabContent = (
+    <section className="card">
+      <div className="card-title-sm">계약변경</div>
+      <table className="grid change-input-grid">
+        <thead><tr><th>항목</th><th>변경전</th><th>변경후</th></tr></thead>
+        <tbody>
+          {changeFields.map((fc, idx) => (
+            <tr key={fc.field}>
+              <td>{fc.field}</td>
+              <td><span className="cell-text">{fc.before}</span></td>
+              <td>
+                {fc.field === "근무여부" ? (
+                  <select className="cell-select" value={fc.after} onChange={(e) => setChangeFields((prev) => prev.map((x, i) => i === idx ? ({ ...x, after: e.target.value }) : x))}>
+                    <option value="4일근무">4일근무</option>
+                    <option value="2일근무">2일근무</option>
+                    <option value="미근무">미근무</option>
+                  </select>
+                ) : fc.field === "소득구분" ? (
+                  <select className="cell-select" value={fc.after} onChange={(e) => setChangeFields((prev) => prev.map((x, i) => i === idx ? ({ ...x, after: e.target.value }) : x))}>
+                    <option value="사업소득">사업소득</option>
+                    <option value="4대보험">4대보험</option>
+                  </select>
+                ) : ["연봉", "보증금", "활동비", "수당"].includes(fc.field) ? (
+                  <input className="cell-input" value={fc.after} readOnly={Boolean(fc.readOnlyAfter)}
+                    onChange={(e) => {
+                      const formatted = numFmt(e.target.value);
+                      setChangeFields((prev) => prev.map((x, i) => i === idx ? ({ ...x, after: formatted }) : x));
+                    }} />
+                ) : (
+                  <input className="cell-input" value={fc.after} readOnly={Boolean(fc.readOnlyAfter)} onChange={(e) => setChangeFields((prev) => prev.map((x, i) => i === idx ? ({ ...x, after: e.target.value }) : x))} />
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th>변경사유</th>
+            <td colSpan={2}>
+              <textarea
+                className="cell-input"
+                style={{ height: "80px", padding: "8px", resize: "vertical", font: "inherit" }}
+                value={changeMemo}
+                onChange={(e) => setChangeMemo(e.target.value)}
+              />
+            </td>
+          </tr>
+          <tr>
+            <th>계약서 파일</th>
+            <td colSpan={2}>
+              <input ref={changeFileRef} type="file" accept=".pdf,application/pdf" hidden
+                onChange={(e) => setChangeFile(e.target.files?.[0] || null)} />
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <button className="line-btn" type="button" onClick={() => changeFileRef.current?.click()}>파일 선택</button>
+                <span style={{ fontSize: "13px", color: changeFile ? "#333" : "#999" }}>
+                  {changeFile ? changeFile.name : "선택된 파일 없음 (선택사항)"}
+                </span>
+              </div>
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+      <div className="actions modal-actions">
+        <button className="primary-btn" onClick={() => void saveChangeRequest()}>저장</button>
+      </div>
+    </section>
+  );
+
+  const tabs: { key: DetailTab; label: string }[] = [{ key: "basic", label: "기본정보" }, { key: "document", label: "계약서" }, { key: "change", label: "계약변경" }, { key: "history", label: "변경이력" }];
+  const tabContent = tab === "basic" ? <DetailBasicTab row={row} /> : tab === "document" ? <DetailDocumentTab row={row} /> : tab === "change" ? changeTabContent : <DetailHistoryTab rows={changeHistoryRows} onOpenDetail={(r) => { setSelectedHistory(r); setHistoryDetailOpen(true); }} />;
   return <div><div className="head-with-btn"><PageHeader title="계약 상세" desc="계약 정보를 확인하고 관리하세요." /><div className="actions"><button className="line-btn" onClick={onBack}>목록으로</button></div></div><section className="card summary-row"><div><div className="meta-label">계약번호</div><div className="meta-value">{row?.no ?? "-"}</div></div><div><div className="meta-label">계약자</div><div className="meta-value">{row?.name ?? "-"}</div></div><div><div className="meta-label">계약상태</div><div className="meta-value"><span className="badge green">{row?.status ?? "정상운영"}</span></div></div><div><div className="meta-label">계약일자</div><div className="meta-value">{row?.contractDate ?? "-"}</div></div><div><div className="meta-label">계약종료일</div><div className="meta-value">{row?.endDate ?? "-"}</div></div></section><div className="tabs">{tabs.map((t) => <button key={t.key} className={tab === t.key ? "tab active" : "tab"} onClick={() => setTab(t.key)}>{t.label}</button>)}</div>{tabContent}
-  {changeOpen && (
-    <div className="modal-backdrop" onClick={() => setChangeOpen(false)}>
-      <section className="modal-card" onClick={(e) => e.stopPropagation()}>
-        <div className="card-title-sm">계약 변경 상세</div>
-        <table className="grid change-input-grid">
-          <thead><tr><th>항목</th><th>변경전</th><th>변경후</th></tr></thead>
-          <tbody>
-            {changeFields.map((fc, idx) => (
-              <tr key={fc.field}>
-                <td>{fc.field}</td>
-                <td><span className="cell-text">{fc.before}</span></td>
-                <td>
-                  {fc.field === "근무여부" ? (
-                    <select className="cell-select" value={fc.after} onChange={(e) => setChangeFields((prev) => prev.map((x, i) => i === idx ? ({ ...x, after: e.target.value }) : x))}>
-                      <option value="근무">근무</option>
-                      <option value="미근무">미근무</option>
-                    </select>
-                  ) : fc.field === "소득구분" ? (
-                    <select className="cell-select" value={fc.after} onChange={(e) => setChangeFields((prev) => prev.map((x, i) => i === idx ? ({ ...x, after: e.target.value }) : x))}>
-                      <option value="사업소득">사업소득</option>
-                      <option value="4대보험">4대보험</option>
-                    </select>
-                  ) : ["연봉", "보증금", "활동비", "수당"].includes(fc.field) ? (
-                    <input className="cell-input" value={fc.after} readOnly={Boolean(fc.readOnlyAfter)}
-                      onChange={(e) => {
-                        const formatted = numFmt(e.target.value);
-                        setChangeFields((prev) => prev.map((x, i) => i === idx ? ({ ...x, after: formatted }) : x));
-                      }} />
-                  ) : (
-                    <input className="cell-input" value={fc.after} readOnly={Boolean(fc.readOnlyAfter)} onChange={(e) => setChangeFields((prev) => prev.map((x, i) => i === idx ? ({ ...x, after: e.target.value }) : x))} />
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr>
-              <th>요청 사유</th>
-              <td colSpan={2}>
-                <textarea
-                  className="cell-input"
-                  style={{ height: "80px", padding: "8px", resize: "vertical" }}
-                  value={changeMemo}
-                  onChange={(e) => setChangeMemo(e.target.value)}
-                />
-              </td>
-            </tr>
-            <tr>
-              <th>계약서 파일</th>
-              <td colSpan={2}>
-                <input ref={changeFileRef} type="file" accept=".pdf,application/pdf" hidden
-                  onChange={(e) => setChangeFile(e.target.files?.[0] || null)} />
-                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                  <button className="line-btn" type="button" onClick={() => changeFileRef.current?.click()}>파일 선택</button>
-                  <span style={{ fontSize: "13px", color: changeFile ? "#333" : "#999" }}>
-                    {changeFile ? changeFile.name : "선택된 파일 없음 (선택사항)"}
-                  </span>
-                </div>
-              </td>
-            </tr>
-          </tfoot>
-        </table>
-        <div className="actions modal-actions">
-          <button className="line-btn" onClick={() => { setChangeOpen(false); setChangeFile(null); if (changeFileRef.current) changeFileRef.current.value = ""; }}>취소</button>
-          <button className="primary-btn" onClick={() => void saveChangeRequest()}>저장</button>
-        </div>
-      </section>
-    </div>
-  )}
   {historyDetailOpen && selectedHistory && (
     <div className="modal-backdrop" onClick={() => setHistoryDetailOpen(false)}>
       <section className="modal-card" onClick={(e) => e.stopPropagation()}>
@@ -2955,7 +2944,7 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
           </tbody>
           <tfoot>
             <tr>
-              <th>요청 사유</th>
+              <th>변경사유</th>
               <td colSpan={2}><span className="cell-text">{selectedHistory.reason}</span></td>
             </tr>
           </tfoot>
