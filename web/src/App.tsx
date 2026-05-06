@@ -1006,7 +1006,7 @@ function ContractList({ onCreate, onDetail, rows }: { onCreate: () => void; onDe
         <div className="contract-filter-bar">
           <div className="search-box">
             <Search size={16} />
-            <input className="input-input" placeholder="계약번호, 계약자명, 추천인, 소속, 관리자 검색" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
+            <input className="input-input" placeholder="계약번호, 계약자명, 추천인, 소속, 관리자 검색" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} autoFocus />
           </div>
           <div style={{ display: "flex", border: "1px solid #dfe6f3", borderRadius: "8px", overflow: "hidden", flexShrink: 0 }}>{(["계약일", "변경일"] as const).map((m) => (<button key={m} type="button" onClick={() => { setDateMode(m); setPage(1); }} style={{ padding: "0 12px", height: "38px", border: "none", cursor: "pointer", fontSize: "13px", fontWeight: dateMode === m ? 600 : 400, background: dateMode === m ? "#1c75ff" : "#fff", color: dateMode === m ? "#fff" : "#5e6a83", transition: "all 0.15s" }}>{m}</button>))}</div><input className="date-filter-input" type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} />
           <span className="date-sep">~</span>
@@ -1358,26 +1358,44 @@ function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
         {docs.length === 0 ? (
           <div className="pdf-empty-box">등록된 계약서 파일이 없습니다.</div>
         ) : (
-          <table className="grid">
-            <thead>
-              <tr><th>업로드일</th><th>파일명</th><th>사유</th><th>보기</th></tr>
-            </thead>
-            <tbody>
-              {docs.map((d) => (
-                <tr key={d.id}>
-                  <td>{d.uploadedAt}</td>
-                  <td>{d.originalName}</td>
-                  <td>{d.reason}</td>
-                  <td>
-                    <button className="line-btn" style={{ padding: "2px 8px" }}
-                      onClick={() => window.open(`${API_BASE}/contracts/${row!.id}/documents/${d.id}/pdf`, "_blank")}>
-                      보기
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div>
+            <table className="grid" style={{ tableLayout: "fixed", width: "100%" }}>
+              <colgroup>
+                <col style={{ width: "110px" }} />
+                <col />
+                <col style={{ width: "100px" }} />
+                <col style={{ width: "70px" }} />
+              </colgroup>
+              <thead>
+                <tr><th>업로드일</th><th>파일명</th><th>사유</th><th>보기</th></tr>
+              </thead>
+            </table>
+            <div style={{ maxHeight: "210px", overflowY: "auto" }}>
+              <table className="grid" style={{ tableLayout: "fixed", width: "100%" }}>
+                <colgroup>
+                  <col style={{ width: "110px" }} />
+                  <col />
+                  <col style={{ width: "100px" }} />
+                  <col style={{ width: "70px" }} />
+                </colgroup>
+                <tbody>
+                  {docs.map((d) => (
+                    <tr key={d.id}>
+                      <td>{d.uploadedAt}</td>
+                      <td style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.originalName}</td>
+                      <td>{d.reason}</td>
+                      <td>
+                        <button className="line-btn" style={{ padding: "2px 8px" }}
+                          onClick={() => window.open(`${API_BASE}/contracts/${row!.id}/documents/${d.id}/pdf`, "_blank")}>
+                          보기
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
         <div className="actions detail-file-actions" style={{ marginTop: "12px" }}>
           {docs.length > 0 && (
@@ -3166,6 +3184,7 @@ function SystemPage({
 
 function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowData | null; onBack: () => void; authUser: any; onUpdate?: (r: ContractRowData) => void }) {
   const [tab, setTab] = useState<DetailTab>("basic");
+  const [docsRefreshKey, setDocsRefreshKey] = useState(0);
   const [changeOpen, setChangeOpen] = useState(false);
   const [changeMemo, setChangeMemo] = useState("");
   const [changeFile, setChangeFile] = useState<File | null>(null);
@@ -3173,7 +3192,7 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
   const getNextMonth = () => { const d = new Date(); d.setMonth(d.getMonth() + 1); return d.toISOString().slice(0, 7); };
   const getThisMonth = () => new Date().toISOString().slice(0, 7);
   const [applyMonth, setApplyMonth] = useState(getNextMonth());
-  const [changeHistoryRows, setChangeHistoryRows] = useState<Array<{ at: string; before: string; after: string; reason: string; changedFields: Array<{ field: string; before: string; after: string }> }>>([]);
+  const [changeHistoryRows, setChangeHistoryRows] = useState<Array<{ at: string; before: string; after: string; reason: string; requester: string; changedFields: Array<{ field: string; before: string; after: string }> }>>([]);
   
   useEffect(() => {
     if (!row?.id) return;
@@ -3233,8 +3252,10 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
 
   const saveChangeRequest = async () => {
     const changed = changeFields.filter((x) => x.before !== x.after);
-    const beforeText = changed.length === 0 ? "변경 없음" : changed.map((x) => `${x.field}:${x.before}`).join(" / ");
-    const afterText = changed.length === 0 ? "변경 없음" : changed.map((x) => `${x.field}:${x.after}`).join(" / ");
+    const fileEntry = changeFile ? [{ field: "계약서 파일", before: "-", after: changeFile.name }] : [];
+    const allChanged = [...changed, ...fileEntry];
+    const beforeText = allChanged.length === 0 ? "변경 없음" : allChanged.map((x) => `${x.field}:${x.before}`).join(" / ");
+    const afterText = allChanged.length === 0 ? "변경 없음" : allChanged.map((x) => `${x.field}:${x.after}`).join(" / ");
     const now = new Date();
     const at = `${formatDate(now)} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
     
@@ -3248,7 +3269,7 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
             before: beforeText,
             after: afterText,
             reason: changeMemo || "-",
-            changedFields: changed,
+            changedFields: allChanged,
             applyMonth: applyMonth || null
           })
         });
@@ -3281,18 +3302,29 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
         });
 
         if (changeFile && row?.id) {
-          const formData = new FormData();
-          formData.append("file", changeFile);
-          formData.append("originalFilename", changeFile.name);
-          formData.append("reason", changeMemo || "변경관리");
-          await fetch(`${API_BASE}/contracts/${row.id}/pdf`, { method: "POST", body: formData });
+          const base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve((reader.result as string).split(",")[1]);
+            reader.onerror = reject;
+            reader.readAsDataURL(changeFile);
+          });
+          const uploadRes = await fetch(`${API_BASE}/contracts/${row.id}/pdf`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ filename: changeFile.name, data: base64, mimeType: changeFile.type || "application/pdf", reason: changeMemo || "변경관리" })
+          });
+          if (!uploadRes.ok) {
+            const errData = await uploadRes.json().catch(() => ({}));
+            alert(`파일 업로드 실패: ${(errData as any).message || uploadRes.status}`);
+          }
           setChangeFile(null);
           if (changeFileRef.current) changeFileRef.current.value = "";
+          setDocsRefreshKey((k) => k + 1);
         }
 
         if (histRes.ok && updateRes.ok) {
           alert("변경사항이 저장되었습니다.");
-          setChangeHistoryRows((prev) => [{ at, before: beforeText, after: afterText, reason: changeMemo || "-", requester: authUser?.email || "관리자", changedFields: changed }, ...prev]);
+          setChangeHistoryRows((prev) => [{ at, before: beforeText, after: afterText, reason: changeMemo || "-", requester: authUser?.email || "관리자", changedFields: allChanged }, ...prev]);
 
           // Update parent state immediately for UI sync
           if (onUpdate && row) {
@@ -3380,14 +3412,14 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
           <tr>
             <th>변경사유</th>
             <td>
-              <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "13px", color: "#555", padding: "4px 0", minHeight: "40px" }}>
+              <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "13px", color: "#555", padding: "4px 0", minHeight: "40px", textAlign: "left" }}>
                 {changeHistoryRows[0]?.reason || "-"}
               </div>
             </td>
             <td>
               <textarea
                 className="cell-input"
-                style={{ height: "80px", padding: "8px", resize: "vertical", font: "inherit" }}
+                style={{ height: "80px", padding: "8px", resize: "vertical", font: "inherit", textAlign: "left" }}
                 value={changeMemo}
                 onChange={(e) => setChangeMemo(e.target.value)}
               />
@@ -3433,7 +3465,7 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
   );
 
   const tabs: { key: DetailTab; label: string }[] = [{ key: "basic", label: "기본정보" }, { key: "document", label: "계약서" }, { key: "change", label: "계약변경" }, { key: "history", label: "변경이력" }];
-  const tabContent = tab === "basic" ? <DetailBasicTab row={row} /> : tab === "document" ? <DetailDocumentTab row={row} /> : tab === "change" ? changeTabContent : <DetailHistoryTab rows={changeHistoryRows} onOpenDetail={(r) => { setSelectedHistory(r); setHistoryDetailOpen(true); }} />;
+  const tabContent = tab === "basic" ? <DetailBasicTab row={row} /> : tab === "document" ? <DetailDocumentTab key={docsRefreshKey} row={row} /> : tab === "change" ? changeTabContent : <DetailHistoryTab rows={changeHistoryRows} onOpenDetail={(r) => { setSelectedHistory(r); setHistoryDetailOpen(true); }} />;
   return <div><div className="head-with-btn"><PageHeader title="계약 상세" desc="계약 정보를 확인하고 관리하세요." /><div className="actions"><button className="line-btn" onClick={onBack}>목록으로</button></div></div><section className="card summary-row"><div><div className="meta-label">계약번호</div><div className="meta-value">{row?.no ?? "-"}</div></div><div><div className="meta-label">계약자</div><div className="meta-value">{row?.name ?? "-"}</div></div><div><div className="meta-label">계약상태</div><div className="meta-value"><span className="badge green">{row?.status ?? "정상운영"}</span></div></div><div><div className="meta-label">계약일자</div><div className="meta-value">{row?.contractDate ?? "-"}</div></div><div><div className="meta-label">계약종료일</div><div className="meta-value">{row?.endDate ?? "-"}</div></div></section><div className="tabs">{tabs.map((t) => <button key={t.key} className={tab === t.key ? "tab active" : "tab"} onClick={() => setTab(t.key)}>{t.label}</button>)}</div>{tabContent}
   {historyDetailOpen && selectedHistory && (
     <div className="modal-backdrop" onClick={() => setHistoryDetailOpen(false)}>

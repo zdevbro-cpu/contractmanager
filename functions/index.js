@@ -569,51 +569,22 @@ app.post("/contracts/:id/pdf", async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query("select contractor_name from contracts where id = $1", [id]);
-    if (result.rowCount === 0) return res.status(404).send("Contract not found");
+    if (result.rowCount === 0) return res.status(404).json({ ok: false, message: "Contract not found" });
 
-    const Busboy = require("busboy");
-    const busboy = Busboy({ headers: req.headers });
-    let uploadPromise = null;
-    let storagePath = null;
-    let parsedName = null;
-    let explicitName = null;
-    let reason = "";
+    const { filename, data, mimeType, reason } = req.body || {};
+    if (!filename || !data) return res.status(400).json({ ok: false, message: "filename, data 필수" });
 
-    busboy.on("field", (name, val) => {
-      if (name === "reason") reason = val;
-      if (name === "originalFilename") explicitName = val;
-    });
+    const buffer = Buffer.from(data, "base64");
+    const safeName = filename.replace(/[#\[\]*?]/g, "_");
+    const storagePath = `contracts/${id}/${Date.now()}_${safeName}`;
+    const file = bucket.file(storagePath);
+    await file.save(buffer, { metadata: { contentType: mimeType || "application/pdf" } });
 
-    busboy.on("file", (_fieldname, fileStream, info) => {
-      const { filename, mimeType } = info;
-      parsedName = filename;
-      storagePath = `contracts/${id}/${Date.now()}_${filename.replace(/[#\[\]*?]/g, "_")}`;
-      const file = bucket.file(storagePath);
-      const writeStream = file.createWriteStream({ metadata: { contentType: mimeType || "application/pdf" } });
-      fileStream.pipe(writeStream);
-      uploadPromise = new Promise((resolve, reject) => {
-        writeStream.on("finish", resolve);
-        writeStream.on("error", reject);
-      });
-    });
-
-    busboy.on("finish", async () => {
-      try {
-        if (!uploadPromise) return res.status(400).json({ ok: false, message: "파일 없음" });
-        await uploadPromise;
-        const originalName = explicitName || parsedName;
-        await pool.query(
-          "insert into contract_documents (contract_id, storage_path, original_file_name, original_name, file_type, reason) values ($1, $2, $3, $3, 'CONTRACT_PDF', $4)",
-          [id, storagePath, originalName, reason || "파일등록"]
-        );
-        res.json({ ok: true, path: storagePath });
-      } catch (err) {
-        res.status(500).json({ ok: false, message: String(err) });
-      }
-    });
-
-    busboy.on("error", (err) => res.status(500).json({ ok: false, message: String(err) }));
-    req.pipe(busboy);
+    await pool.query(
+      "insert into contract_documents (contract_id, storage_path, original_file_name, original_name, file_type, reason) values ($1, $2, $3, $3, 'CONTRACT_PDF', $4)",
+      [id, storagePath, filename, reason || "파일등록"]
+    );
+    res.json({ ok: true, path: storagePath });
   } catch (error) {
     res.status(500).json({ ok: false, message: String(error) });
   }

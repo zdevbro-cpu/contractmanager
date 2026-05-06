@@ -566,6 +566,7 @@ button { font-family: inherit; }
   padding: 0 2px;
   font-size: 13px;
   color: #1a2438;
+  text-align: left;
 }
 .change-input-grid .cell-input[readonly] {
   color: #5e6a83;
