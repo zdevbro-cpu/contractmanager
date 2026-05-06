@@ -3480,7 +3480,7 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
             </td>
           </tr>
           <tr>
-            <th>수당 적용월</th>
+            <th>{row?.isAppointment ? "급여 적용월" : "수당 적용월"}</th>
             <td><span className="cell-text" style={{ color: "#888", fontSize: "12px" }}>수당에 반영할 월을 선택</span></td>
             <td>
               <input type="month" className="cell-input" value={applyMonth}
