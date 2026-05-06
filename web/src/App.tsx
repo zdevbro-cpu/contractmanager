@@ -92,9 +92,9 @@ const menus: { key: MenuKey; label: string; icon: JSX.Element; indent?: boolean;
   { key: "system", label: "시스템관리", icon: <Settings size={18} /> }
 ];
 
-const CONTRACT_STATUS_OPTIONS = ["정상운영", "일부양도", "양도", "양수", "계약해지"];
+const CONTRACT_STATUS_OPTIONS = ["정상운영", "일부양도", "양도", "양수", "계약해지", "중복계약"];
 const APPOINTMENT_STATUS_OPTIONS = ["정상운영", "일시정지", "계약해지", "계약만료"];
-const INACTIVE_STATUSES = new Set(["양도", "계약해지", "계약만료"]);
+const INACTIVE_STATUSES = new Set(["양도", "계약해지", "계약만료", "중복계약"]);
 
 function appointmentStatusClass(status: string) {
   if (status === "정상운영") return "green";
