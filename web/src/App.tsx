@@ -1410,10 +1410,10 @@ function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
           <div className="pdf-empty-box">등록된 계약서 파일이 없습니다.</div>
         ) : (
           <div style={{ maxHeight: "210px", overflowY: "auto" }}>
-            <table className="grid" style={{ tableLayout: "fixed", width: "100%" }}>
+            <table className="grid" style={{ tableLayout: "fixed", width: "auto" }}>
               <colgroup>
-                <col style={{ width: "110px" }} />
-                <col style={{ width: "240px" }} />
+                <col style={{ width: "90px" }} />
+                <col style={{ width: "220px" }} />
                 <col style={{ width: "120px" }} />
                 <col style={{ width: "70px" }} />
               </colgroup>
