@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(node -e \"const data = require\\('./src/data/contracts.json'\\); console.log\\('total:', data.length, 'first keys:', Object.keys\\(data[0]\\).join\\(', '\\)\\)\")",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(firebase deploy *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

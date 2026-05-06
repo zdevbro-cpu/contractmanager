@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleDollarSign,
+  Download,
   Eye,
   FileText,
   History,
@@ -92,9 +93,9 @@ const menus: { key: MenuKey; label: string; icon: JSX.Element; indent?: boolean;
   { key: "system", label: "시스템관리", icon: <Settings size={18} /> }
 ];
 
-const CONTRACT_STATUS_OPTIONS = ["정상운영", "일부양도", "양도", "양수", "계약해지", "중복계약"];
+const CONTRACT_STATUS_OPTIONS = ["정상운영", "양수", "양도", "양도(영크)", "양도(일부)", "폐기"];
 const APPOINTMENT_STATUS_OPTIONS = ["정상운영", "일시정지", "계약해지", "계약만료"];
-const INACTIVE_STATUSES = new Set(["양도", "계약해지", "계약만료", "중복계약"]);
+const INACTIVE_STATUSES = new Set(["양도", "양도(영크)", "양도(일부)", "계약해지", "계약만료", "폐기", "중복계약"]);
 
 function appointmentStatusClass(status: string) {
   if (status === "정상운영") return "green";
@@ -820,7 +821,7 @@ function formatDateTime(v: string) {
 
 function statusClass(s: string) {
   if (s.includes("정상") || s.includes("완료")) return "green";
-  if (s === "양도" || s === "양수" || s === "일부양도") return "amber";
+  if (s === "양도" || s === "양수" || s === "양도(영크)" || s === "양도(일부)" || s === "일부양도") return "amber";
   if (s.includes("오류") || s.includes("반려") || s === "계약해지") return "red";
   if (s.includes("대기") || s.includes("보류")) return "amber";
   return "blue";
@@ -987,6 +988,7 @@ function ContractList({ onCreate, onDetail, rows }: { onCreate: () => void; onDe
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(15);
   const [selectedNo, setSelectedNo] = useState<string | null>(null);
+  const [contractFilter, setContractFilter] = useState<"전체" | "신규" | "변경">("전체");
   const selectedNoRef = useRef<string | null>(null);
   const pagedRef = useRef<ContractRowData[]>([]);
   const onDetailRef = useRef(onDetail);
@@ -998,6 +1000,8 @@ function ContractList({ onCreate, onDetail, rows }: { onCreate: () => void; onDe
     const targetDate = dateMode === "변경일" ? (r.updatedAt || r.createdAt || "") : r.contractDate;
     if (dateFrom && targetDate < dateFrom) return false;
     if (dateTo && targetDate > dateTo) return false;
+    if (contractFilter === "신규" && r.updatedAt && r.createdAt && r.updatedAt !== r.createdAt) return false;
+    if (contractFilter === "변경" && (!r.updatedAt || !r.createdAt || r.updatedAt === r.createdAt)) return false;
     return true;
   });
 
@@ -1038,7 +1042,34 @@ function ContractList({ onCreate, onDetail, rows }: { onCreate: () => void; onDe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, dateFrom, dateTo, dateMode, page, perPage, rows.length]);
 
-  const handleReset = () => { setSearch(""); setDateFrom(""); setDateTo(""); setPage(1); };
+  const handleReset = () => { setSearch(""); setDateFrom(""); setDateTo(""); setPage(1); setContractFilter("전체"); };
+
+  const exportToExcel = async () => {
+    const XLSX = await import("xlsx");
+    const headers = ["소속", "관리자", "계약자명", "근무여부", "계약종류", "추천인", "계약일자", "수당지급일", "계약종료일", "보증금액", "수당", "상태", "은행명", "계좌번호", "예금주"];
+    const dataRows = filtered.map((r) => [
+      r.affiliation || "-", r.managerName || "-", r.name, r.workType || "-",
+      r.type, r.ref || "-", r.contractDate, r.payoutDate, r.endDate,
+      r.depositAmount, r.allowanceAmount, r.status,
+      r.bankName || "-", r.accountNo || "-", r.accountHolder || "-",
+    ]);
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
+    ws["!cols"] = [
+      { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 20 },
+      { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 },
+      { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 18 }, { wch: 12 },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "계약목록");
+    const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `계약목록_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   const pageButtons = (): (number | "...")[] => {
     if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
@@ -1067,7 +1098,22 @@ function ContractList({ onCreate, onDetail, rows }: { onCreate: () => void; onDe
         </div>
       </section>
       <section className="card">
-        <div className="card-title-sm">전체 {filtered.length.toLocaleString("ko-KR")}건</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+          <div className="card-title-sm" style={{ marginBottom: 0 }}>전체 {filtered.length.toLocaleString("ko-KR")}건</div>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            <div style={{ display: "flex", border: "1px solid #dfe6f3", borderRadius: "8px", overflow: "hidden" }}>
+              {(["신규", "변경"] as const).map((m) => (
+                <button key={m} type="button" onClick={() => { setContractFilter(contractFilter === m ? "전체" : m); setPage(1); }}
+                  style={{ padding: "0 12px", height: "32px", border: "none", cursor: "pointer", fontSize: "13px", fontWeight: contractFilter === m ? 600 : 400, background: contractFilter === m ? "#1c75ff" : "#fff", color: contractFilter === m ? "#fff" : "#5e6a83", transition: "all 0.15s" }}>
+                  {m}
+                </button>
+              ))}
+            </div>
+            <button type="button" onClick={exportToExcel} style={{ display: "flex", alignItems: "center", gap: "4px", padding: "0 12px", height: "32px", border: "1px solid #dfe6f3", borderRadius: "8px", background: "#fff", color: "#5e6a83", fontSize: "13px", cursor: "pointer" }}>
+              <Download size={14} /> 엑셀
+            </button>
+          </div>
+        </div>
         <ContractListTable onDetail={onDetail} rows={paged} selectedNo={selectedNo} onSelect={(r) => setSelectedNo(r.no)} />
         <div className="contract-pagination">
           <div className="pager">
@@ -1237,7 +1283,7 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
 
   return (
     <div>
-      <div className="head-with-btn"><PageHeader title="신규 계약 등록" desc="계약 정보를 입력하고 등록하세요." /><button className="line-btn" onClick={onBack}>목록으로</button></div>
+      <div className="head-with-btn"><PageHeader title="신규계약등록" desc="계약 정보를 입력하고 등록하세요." /><button className="line-btn" onClick={onBack}>목록으로</button></div>
 
       <section className="card">
         <div className="card-title-sm">기본정보</div>
@@ -1250,7 +1296,7 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
             </select>
           </label>
           <label className="field"><span>계약번호</span><input className="input-input" value={contractNoInput} onChange={(e) => setContractNoInput(e.target.value)} placeholder={autoContractNo} /></label>
-          <label className="field"><span>소속</span><input className="input-input" value={affiliation} onChange={(e) => setAffiliation(e.target.value)} placeholder="소속 입력" /></label>
+          <label className="field"><span>관리자소속</span><input className="input-input" value={affiliation} onChange={(e) => setAffiliation(e.target.value)} placeholder="소속 입력" /></label>
           <label className="field"><span>관리자</span><input className="input-input" value={managerName} onChange={(e) => setManagerName(e.target.value)} placeholder="관리자명 입력" /></label>
         </div>
       </section>
@@ -3644,17 +3690,19 @@ export function App() {
       <div className="login-shell">
         <section className="login-card">
           <h1>계약관리 로그인</h1>
-          <label className="field"><span>이메일</span><input className="input-input" type="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} placeholder="admin@contractmanager.com" /></label>
-          <label className="field"><span>비밀번호</span><input className="input-input" type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} placeholder="비밀번호" onKeyDown={(e) => { if (e.key === "Enter") doLogin(); }} /></label>
-          {loginError ? <div className="login-error">{loginError}</div> : null}
-          <div className="modal-actions" style={{ marginTop: "10px" }}>
-            <button className="line-btn" type="button" onClick={() => {
-              setLoginEmail("");
-              setLoginPassword("");
-              setLoginError("");
-            }}>초기화</button>
-            <button className="primary-btn" onClick={doLogin}>로그인</button>
-          </div>
+          <form onSubmit={(e) => { e.preventDefault(); doLogin(); }}>
+            <label className="field"><span>이메일</span><input className="input-input" type="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} placeholder="admin@contractmanager.com" autoFocus /></label>
+            <label className="field"><span>비밀번호</span><input className="input-input" type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} placeholder="비밀번호" /></label>
+            {loginError ? <div className="login-error">{loginError}</div> : null}
+            <div className="modal-actions" style={{ marginTop: "10px" }}>
+              <button className="line-btn" type="button" onClick={() => {
+                setLoginEmail("");
+                setLoginPassword("");
+                setLoginError("");
+              }}>초기화</button>
+              <button className="primary-btn" type="submit">로그인</button>
+            </div>
+          </form>
         </section>
       </div>
     );
