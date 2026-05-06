@@ -1413,7 +1413,7 @@ function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
             <table className="grid" style={{ tableLayout: "fixed" }}>
               <colgroup>
                 <col style={{ width: "110px" }} />
-                <col style={{ width: "360px" }} />
+                <col style={{ width: "240px" }} />
                 <col style={{ width: "120px" }} />
                 <col style={{ width: "70px" }} />
               </colgroup>
@@ -1425,7 +1425,7 @@ function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
               <table className="grid" style={{ tableLayout: "fixed" }}>
                 <colgroup>
                   <col style={{ width: "110px" }} />
-                  <col style={{ width: "360px" }} />
+                  <col style={{ width: "240px" }} />
                   <col style={{ width: "120px" }} />
                   <col style={{ width: "70px" }} />
                 </colgroup>
