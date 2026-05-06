@@ -93,6 +93,7 @@ const menus: { key: MenuKey; label: string; icon: JSX.Element; indent?: boolean;
 ];
 
 const CONTRACT_STATUS_OPTIONS = ["정상운영", "일부양도", "양도", "양수", "계약해지"];
+const APPOINTMENT_STATUS_OPTIONS = ["정상운영", "일시정지", "계약해지", "계약만료"];
 const INACTIVE_STATUSES = new Set(["양도", "계약해지", "계약만료"]);
 
 function appointmentStatusClass(status: string) {
@@ -3273,7 +3274,7 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
     const fmtAmt = (v: string | undefined) => numFmt(v || "");
     return [
       { field: "계약번호", before: r?.no ?? "-", after: r?.no ?? "-", readOnlyAfter: true },
-      { field: "계약상태", before: r?.status || "정상운영", after: r?.status || "정상운영", readOnlyAfter: isAppt },
+      { field: "계약상태", before: r?.status || "정상운영", after: r?.status || "정상운영" },
       ...(isAppt ? [] : [
         { field: "소속", before: r?.affiliation || "", after: r?.affiliation || "" },
         { field: "관리자", before: r?.managerName || "", after: r?.managerName || "" }
@@ -3435,11 +3436,9 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
               <td><span className="cell-text">{fc.before}</span></td>
               <td>
                 {fc.field === "계약상태" ? (
-                  fc.readOnlyAfter
-                    ? <input className="cell-input" value={fc.after} readOnly />
-                    : <select className="cell-select" value={fc.after} onChange={(e) => updateChangeField(idx, e.target.value)}>
-                        {CONTRACT_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
+                  <select className="cell-select" value={fc.after} onChange={(e) => updateChangeField(idx, e.target.value)}>
+                    {(row?.isAppointment ? APPOINTMENT_STATUS_OPTIONS : CONTRACT_STATUS_OPTIONS).map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
                 ) : fc.field === "근무여부" ? (
                   <select className="cell-select" value={fc.after} onChange={(e) => updateChangeField(idx, e.target.value)}>
                     <option value="4일근무">4일근무</option>
