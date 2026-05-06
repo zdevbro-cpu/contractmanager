@@ -88,7 +88,10 @@ function normalizeRows(rows) {
     position: row.position ?? "",
     phone: row.phone ?? "",
     createdAt: row.created_at ? toIsoDate(row.created_at) : "",
-    updatedAt: row.updated_at ? toIsoDate(row.updated_at) : ""
+    updatedAt: row.updated_at ? toIsoDate(row.updated_at) : "",
+    workType: row.work_type || "4일근무",
+    affiliation: row.affiliation ?? "",
+    managerName: row.manager_name ?? ""
   }));
 }
 
@@ -109,8 +112,13 @@ async function ensureAppSchema() {
   await safeAlter("alter table contracts add column if not exists report_start_date date");
   await safeAlter("alter table contracts add column if not exists position varchar(50)");
   await safeAlter("alter table contracts add column if not exists pdf_storage_path text");
+  await safeAlter("alter table contracts add column if not exists work_type text");
+  await safeAlter("alter table contracts add column if not exists affiliation text");
+  await safeAlter("alter table contracts add column if not exists manager_name text");
   await safeAlter("alter table contract_documents add column if not exists original_name text");
   await safeAlter("alter table contract_documents add column if not exists reason text");
+  await safeAlter("alter table contract_changes add column if not exists apply_month text");
+  await safeAlter("alter table contract_changes add column if not exists applied boolean not null default false");
   await pool.query(`
     create table if not exists contract_types (
       id bigserial primary key,
@@ -234,7 +242,10 @@ app.get("/contracts", async (_req, res) => {
         report_start_date,
         position,
         created_at,
-        updated_at
+        updated_at,
+        work_type,
+        affiliation,
+        manager_name
       from contracts
       where contractor_name is not null
         and btrim(contractor_name) <> ''
@@ -256,8 +267,8 @@ app.post("/contracts", async (req, res) => {
         referrer_name, contract_date, first_allowance_date, contract_end_date,
         deposit_amount, work_allowance, bank_name, account_no, account_holder,
         resident_registration_number, phone, is_appointment, insurance_type,
-        work_start_date, report_start_date, position
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+        work_start_date, report_start_date, position, affiliation, manager_name
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
       RETURNING id, contract_no`,
       [
         body.contractNo ?? null,
@@ -278,7 +289,9 @@ app.post("/contracts", async (req, res) => {
         body.insuranceType ?? "사업소득",
         body.workStartDate ?? null,
         body.reportStartDate ?? null,
-        body.position ?? null
+        body.position ?? null,
+        body.affiliation ?? null,
+        body.managerName ?? null
       ]
     );
     res.json({ ok: true, id: result.rows[0].id, contractNo: result.rows[0].contract_no });
@@ -315,6 +328,9 @@ app.put("/contracts/:contractNo", async (req, res) => {
         work_start_date = coalesce($18, work_start_date),
         report_start_date = coalesce($19, report_start_date),
         position = coalesce($20, position),
+        work_type = coalesce($21, work_type),
+        affiliation = coalesce($22, affiliation),
+        manager_name = coalesce($23, manager_name),
         updated_at = now()
       where contract_no = $1 or id::text = $1 or id::text = split_part($1, '-', 3)
       returning contract_no
@@ -323,9 +339,9 @@ app.put("/contracts/:contractNo", async (req, res) => {
         contractNo,
         body.name ?? null,
         body.type ?? null,
-        body.contractDate ?? null,
-        body.payoutDate ?? null,
-        body.endDate ?? null,
+        body.contractDate || null,
+        body.payoutDate || null,
+        body.endDate || null,
         body.depositAmountValue ?? null,
         body.allowanceAmountValue ?? null,
         body.ref ?? null,
@@ -339,7 +355,10 @@ app.put("/contracts/:contractNo", async (req, res) => {
         body.insuranceType ?? null,
         body.workStartDate ?? null,
         body.reportStartDate ?? null,
-        body.position ?? null
+        body.position ?? null,
+        body.workType || null,
+        body.affiliation ?? null,
+        body.managerName ?? null
       ]
     );
     if (result.rowCount === 0) {
@@ -395,12 +414,87 @@ app.get("/contracts/:id/history", async (req, res) => {
 
 app.post("/contracts/:id/history", async (req, res) => {
   const { id } = req.params;
-  const { before, after, reason, changedFields } = req.body ?? {};
+  const { before, after, reason, changedFields, applyMonth } = req.body ?? {};
   try {
     await pool.query(
-      "insert into contract_changes (contract_id, before_text, after_text, reason, changed_fields) values ($1, $2, $3, $4, $5)",
-      [id, before, after, reason, JSON.stringify(changedFields || [])]
+      "insert into contract_changes (contract_id, before_text, after_text, reason, changed_fields, apply_month) values ($1, $2, $3, $4, $5, $6)",
+      [id, before, after, reason, JSON.stringify(changedFields || []), applyMonth || null]
     );
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
+  }
+});
+
+// 변경이력 통합 조회 (기간/이름/추천인/계약종류 필터)
+app.get("/changes", async (req, res) => {
+  const { dateFrom, dateTo, name, referrer, contractType } = req.query;
+  const conditions = [];
+  const params = [];
+  let idx = 1;
+  if (dateFrom) { conditions.push(`cc.at >= $${idx++}`); params.push(dateFrom); }
+  if (dateTo) { conditions.push(`cc.at < ($${idx++}::date + interval '1 day')`); params.push(dateTo); }
+  if (name) { conditions.push(`c.contractor_name ilike $${idx++}`); params.push(`%${name}%`); }
+  if (referrer) { conditions.push(`c.referrer_name ilike $${idx++}`); params.push(`%${referrer}%`); }
+  if (contractType === "점주점장") { conditions.push(`c.is_appointment = false`); }
+  else if (contractType === "임용") { conditions.push(`c.is_appointment = true`); }
+  const where = conditions.length ? `where ${conditions.join(" and ")}` : "";
+  try {
+    const result = await pool.query(
+      `select cc.id, cc.contract_id, cc.at, cc.before_text, cc.after_text, cc.reason,
+              cc.changed_fields, cc.apply_month, cc.applied,
+              c.contractor_name, c.referrer_name, c.is_appointment
+       from contract_changes cc
+       join contracts c on c.id = cc.contract_id
+       ${where}
+       order by cc.at desc
+       limit 500`,
+      params
+    );
+    res.json({ rows: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
+  }
+});
+
+// 특정 월 미적용 변경건 조회
+app.get("/changes/pending", async (req, res) => {
+  const { month } = req.query;
+  if (!month) return res.status(400).json({ message: "month required" });
+  try {
+    const result = await pool.query(
+      `select cc.id, cc.contract_id, cc.at, cc.before_text, cc.after_text, cc.reason,
+              cc.changed_fields, cc.apply_month, cc.applied,
+              c.contractor_name, c.referrer_name, c.is_appointment
+       from contract_changes cc
+       join contracts c on c.id = cc.contract_id
+       where cc.apply_month = $1 and cc.applied = false
+       order by cc.at desc`,
+      [month]
+    );
+    res.json({ rows: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
+  }
+});
+
+// 변경건 적용완료 처리
+app.patch("/changes/:id/applied", async (req, res) => {
+  const { id } = req.params;
+  const { applied } = req.body ?? {};
+  try {
+    await pool.query("update contract_changes set applied = $1 where id = $2", [applied !== false, id]);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
+  }
+});
+
+// 변경이력 삭제
+app.delete("/changes/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query("delete from contract_changes where id = $1", [id]);
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ message: String(error) });
@@ -481,17 +575,19 @@ app.post("/contracts/:id/pdf", async (req, res) => {
     const busboy = Busboy({ headers: req.headers });
     let uploadPromise = null;
     let storagePath = null;
-    let originalName = null;
+    let parsedName = null;
+    let explicitName = null;
     let reason = "";
 
     busboy.on("field", (name, val) => {
       if (name === "reason") reason = val;
+      if (name === "originalFilename") explicitName = val;
     });
 
     busboy.on("file", (_fieldname, fileStream, info) => {
       const { filename, mimeType } = info;
-      originalName = filename;
-      storagePath = `contracts/${id}/${Date.now()}_${filename.replace(/[^a-zA-Z0-9가-힣._-]/g, "_")}`;
+      parsedName = filename;
+      storagePath = `contracts/${id}/${Date.now()}_${filename.replace(/[#\[\]*?]/g, "_")}`;
       const file = bucket.file(storagePath);
       const writeStream = file.createWriteStream({ metadata: { contentType: mimeType || "application/pdf" } });
       fileStream.pipe(writeStream);
@@ -505,6 +601,7 @@ app.post("/contracts/:id/pdf", async (req, res) => {
       try {
         if (!uploadPromise) return res.status(400).json({ ok: false, message: "파일 없음" });
         await uploadPromise;
+        const originalName = explicitName || parsedName;
         await pool.query(
           "insert into contract_documents (contract_id, storage_path, original_file_name, original_name, file_type, reason) values ($1, $2, $3, $3, 'CONTRACT_PDF', $4)",
           [id, storagePath, originalName, reason || "파일등록"]

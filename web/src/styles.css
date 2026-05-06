@@ -535,8 +535,7 @@ button { font-family: inherit; }
 .change-input-grid th,
 .change-input-grid td {
   text-align: center;
-  padding-top: 6px;
-  padding-bottom: 6px;
+  padding: 2px 8px;
 }
 .change-input-grid td:first-child {
   font-weight: 700;
@@ -562,10 +561,10 @@ button { font-family: inherit; }
   width: 100%;
   border: 0;
   background: transparent;
-  height: 28px;
-  min-height: 28px;
+  height: 24px;
+  min-height: 24px;
   padding: 0 2px;
-  font-size: 14px;
+  font-size: 13px;
   color: #1a2438;
 }
 .change-input-grid .cell-input[readonly] {
