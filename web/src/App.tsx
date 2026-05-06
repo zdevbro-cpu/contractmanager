@@ -616,7 +616,7 @@ function SalaryPage({ rows }: { rows: ContractRowData[] }) {
   });
 
   const filteredRows = allowanceRows.filter((row) => {
-    if (INACTIVE_STATUSES.has(row.status)) return false;
+    if (row.status !== "정상운영") return false;
     const inDate = (!startDate || (row.baseDate && row.baseDate >= startDate)) &&
                    (!endDate   || (row.baseDate && row.baseDate <= endDate));
     const inContractor = !contractorFilter || contractorFilter === "전체" || row.name.includes(contractorFilter);
