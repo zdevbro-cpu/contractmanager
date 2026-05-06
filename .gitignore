@@ -26,3 +26,6 @@ web/node_modules/
 # IDE
 .vscode/
 .idea/
+
+# Data folder (local files only)
+data/
