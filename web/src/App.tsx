@@ -101,7 +101,13 @@ function appointmentStatusClass(status: string) {
   return "";
 }
 
-function AppointmentListTable({ onDetail, rows, onStatusChange }: { onDetail: (row: ContractRowData) => void; rows: ContractRowData[]; onStatusChange: (id: number, status: string) => void }) {
+function AppointmentListTable({ onDetail, rows, onStatusChange, selectedNo, onSelect }: { onDetail: (row: ContractRowData) => void; rows: ContractRowData[]; onStatusChange: (id: number, status: string) => void; selectedNo?: string | null; onSelect?: (row: ContractRowData) => void }) {
+  useEffect(() => {
+    if (!selectedNo) return;
+    const el = document.querySelector(`[data-row-no="${selectedNo}"]`) as HTMLElement | null;
+    el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [selectedNo]);
+
   return (
     <table className="grid allowance-grid">
       <thead>
@@ -120,7 +126,8 @@ function AppointmentListTable({ onDetail, rows, onStatusChange }: { onDetail: (r
       </thead>
       <tbody>
         {rows.map((r) => (
-          <tr key={r.id}>
+          <tr key={r.id} data-row-no={r.no} onClick={() => onSelect?.(r)} onDoubleClick={() => onDetail(r)}
+            style={{ cursor: "pointer", background: selectedNo === r.no ? "#dbeafe" : undefined, outline: selectedNo === r.no ? "2px solid #3b82f6" : undefined, outlineOffset: "-2px" }}>
             <td>{r.name}</td>
             <td>{r.type}</td>
             <td>{r.ref}</td>
@@ -133,12 +140,13 @@ function AppointmentListTable({ onDetail, rows, onStatusChange }: { onDetail: (r
               <select
                 className={`status-select status-${appointmentStatusClass(r.status || "정상운영")}`}
                 value={r.status || "정상운영"}
-                onChange={(e) => onStatusChange(r.id, e.target.value)}
+                onChange={(e) => { e.stopPropagation(); onStatusChange(r.id, e.target.value); }}
+                onClick={(e) => e.stopPropagation()}
               >
                 {APPOINTMENT_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </td>
-            <td><button className="icon-btn" onClick={() => onDetail(r)}><Eye size={14} /></button></td>
+            <td><button className="icon-btn" onClick={(e) => { e.stopPropagation(); onDetail(r); }}><Eye size={14} /></button></td>
           </tr>
         ))}
       </tbody>
@@ -152,6 +160,11 @@ function AppointmentPage({ onCreate, onDetail, rows, onStatusChange }: { onCreat
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(20);
+  const [selectedNo, setSelectedNo] = useState<string | null>(null);
+  const selectedNoRef = useRef<string | null>(null);
+  const pagedRef = useRef<ContractRowData[]>([]);
+  const onDetailRef = useRef(onDetail);
+  onDetailRef.current = onDetail;
 
   const filtered = rows.filter((r) => {
     const q = search.trim().toLowerCase();
@@ -164,6 +177,36 @@ function AppointmentPage({ onCreate, onDetail, rows, onStatusChange }: { onCreat
   const totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
   const safePage = Math.min(page, totalPages);
   const paged = filtered.slice((safePage - 1) * perPage, safePage * perPage);
+
+  selectedNoRef.current = selectedNo;
+  pagedRef.current = paged;
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const current = pagedRef.current;
+      const selNo = selectedNoRef.current;
+      if (e.key === "Enter" && selNo) {
+        const row = current.find((r) => r.no === selNo);
+        if (row) { onDetailRef.current(row); return; }
+      }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (current.length === 0) return;
+        const idx = selNo ? current.findIndex((r) => r.no === selNo) : -1;
+        const nextIdx = e.key === "ArrowDown"
+          ? (idx === -1 ? 0 : Math.min(idx + 1, current.length - 1))
+          : (idx === -1 ? 0 : Math.max(idx - 1, 0));
+        if (current[nextIdx]) setSelectedNo(current[nextIdx].no);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    setSelectedNo(paged.length > 0 ? paged[0].no : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, dateFrom, dateTo, page, perPage, rows.length]);
 
   const handleReset = () => { setSearch(""); setDateFrom(""); setDateTo(""); setPage(1); };
 
@@ -184,7 +227,7 @@ function AppointmentPage({ onCreate, onDetail, rows, onStatusChange }: { onCreat
         <div className="contract-filter-bar">
           <div className="search-box">
             <Search size={16} />
-            <input className="input-input" placeholder="계약자명, 추천인 검색" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
+            <input className="input-input" placeholder="계약자명, 추천인 검색" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} autoFocus />
           </div>
           <input className="date-filter-input" type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} />
           <span className="date-sep">~</span>
@@ -195,7 +238,7 @@ function AppointmentPage({ onCreate, onDetail, rows, onStatusChange }: { onCreat
       </section>
       <section className="card">
         <div className="card-title-sm">전체 {filtered.length.toLocaleString("ko-KR")}건</div>
-        <AppointmentListTable onDetail={onDetail} rows={paged} onStatusChange={onStatusChange} />
+        <AppointmentListTable onDetail={onDetail} rows={paged} onStatusChange={onStatusChange} selectedNo={selectedNo} onSelect={(r) => setSelectedNo(r.no)} />
         <div className="contract-pagination">
           <div className="pager">
             <button className="pager-btn" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={safePage === 1}>‹</button>
@@ -270,6 +313,17 @@ function AppointmentCreate({ onBack }: { onBack: () => void }) {
   useEffect(() => {
     generateContractNo(contractDate);
   }, [contractDate]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Backspace") return;
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      onBack();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onBack]);
 
   useEffect(() => {
     setPosition("");
