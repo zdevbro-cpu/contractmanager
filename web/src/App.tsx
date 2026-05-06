@@ -1413,7 +1413,7 @@ function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
             <table className="grid doc-table" style={{ tableLayout: "fixed", width: "100%" }}>
               <colgroup>
                 <col style={{ width: "120px" }} />
-                <col style={{ width: "360px" }} />
+                <col style={{ width: "410px" }} />
                 <col />
                 <col style={{ width: "80px" }} />
               </colgroup>
