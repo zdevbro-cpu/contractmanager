@@ -331,6 +331,7 @@ app.put("/contracts/:contractNo", async (req, res) => {
         work_type = coalesce($21, work_type),
         affiliation = coalesce($22, affiliation),
         manager_name = coalesce($23, manager_name),
+        status = coalesce($24, status),
         updated_at = now()
       where contract_no = $1 or id::text = $1 or id::text = split_part($1, '-', 3)
       returning contract_no
@@ -358,7 +359,8 @@ app.put("/contracts/:contractNo", async (req, res) => {
         body.position ?? null,
         body.workType || null,
         body.affiliation ?? null,
-        body.managerName ?? null
+        body.managerName ?? null,
+        body.status ?? null
       ]
     );
     if (result.rowCount === 0) {
@@ -384,7 +386,7 @@ app.delete("/contracts/appointments/clear", async (_req, res) => {
 app.patch("/contracts/:id/status", async (req, res) => {
   const { id } = req.params;
   const { status } = req.body ?? {};
-  const allowed = ["정상운영", "일시정지", "계약해지", "계약만료"];
+  const allowed = ["정상운영", "일시정지", "계약해지", "계약만료", "양도", "양수"];
   if (!status || !allowed.includes(status)) return res.status(400).json({ message: "유효하지 않은 상태값" });
   try {
     await ensureAppSchema();

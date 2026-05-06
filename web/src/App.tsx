@@ -92,16 +92,16 @@ const menus: { key: MenuKey; label: string; icon: JSX.Element; indent?: boolean;
   { key: "system", label: "시스템관리", icon: <Settings size={18} /> }
 ];
 
-const APPOINTMENT_STATUS_OPTIONS = ["정상운영", "일시정지", "계약해지", "계약만료"];
+const CONTRACT_STATUS_OPTIONS = ["정상운영", "양도", "양수", "계약해지"];
 
 function appointmentStatusClass(status: string) {
   if (status === "정상운영") return "green";
-  if (status === "일시정지") return "orange";
-  if (status === "계약해지" || status === "계약만료") return "red";
+  if (status === "일시정지" || status === "계약만료") return "amber";
+  if (status === "계약해지") return "red";
   return "";
 }
 
-function AppointmentListTable({ onDetail, rows, onStatusChange, selectedNo, onSelect }: { onDetail: (row: ContractRowData) => void; rows: ContractRowData[]; onStatusChange: (id: number, status: string) => void; selectedNo?: string | null; onSelect?: (row: ContractRowData) => void }) {
+function AppointmentListTable({ onDetail, rows, selectedNo, onSelect }: { onDetail: (row: ContractRowData) => void; rows: ContractRowData[]; selectedNo?: string | null; onSelect?: (row: ContractRowData) => void }) {
   useEffect(() => {
     if (!selectedNo) return;
     const el = document.querySelector(`[data-row-no="${selectedNo}"]`) as HTMLElement | null;
@@ -137,14 +137,7 @@ function AppointmentListTable({ onDetail, rows, onStatusChange, selectedNo, onSe
             <td>{r.depositAmount}</td>
             <td>{r.allowanceAmount}</td>
             <td className="center-td">
-              <select
-                className={`status-select status-${appointmentStatusClass(r.status || "정상운영")}`}
-                value={r.status || "정상운영"}
-                onChange={(e) => { e.stopPropagation(); onStatusChange(r.id, e.target.value); }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {APPOINTMENT_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
+              <span className={`status-fixed ${appointmentStatusClass(r.status || "정상운영")}`}>{r.status || "정상운영"}</span>
             </td>
             <td><button className="icon-btn" onClick={(e) => { e.stopPropagation(); onDetail(r); }}><Eye size={14} /></button></td>
           </tr>
@@ -154,7 +147,7 @@ function AppointmentListTable({ onDetail, rows, onStatusChange, selectedNo, onSe
   );
 }
 
-function AppointmentPage({ onCreate, onDetail, rows, onStatusChange }: { onCreate: () => void; onDetail: (row: ContractRowData) => void; rows: ContractRowData[]; onStatusChange: (id: number, status: string) => void }) {
+function AppointmentPage({ onCreate, onDetail, rows }: { onCreate: () => void; onDetail: (row: ContractRowData) => void; rows: ContractRowData[] }) {
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -238,7 +231,7 @@ function AppointmentPage({ onCreate, onDetail, rows, onStatusChange }: { onCreat
       </section>
       <section className="card">
         <div className="card-title-sm">전체 {filtered.length.toLocaleString("ko-KR")}건</div>
-        <AppointmentListTable onDetail={onDetail} rows={paged} onStatusChange={onStatusChange} selectedNo={selectedNo} onSelect={(r) => setSelectedNo(r.no)} />
+        <AppointmentListTable onDetail={onDetail} rows={paged} selectedNo={selectedNo} onSelect={(r) => setSelectedNo(r.no)} />
         <div className="contract-pagination">
           <div className="pager">
             <button className="pager-btn" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={safePage === 1}>‹</button>
@@ -621,6 +614,7 @@ function SalaryPage({ rows }: { rows: ContractRowData[] }) {
   });
 
   const filteredRows = allowanceRows.filter((row) => {
+    if (row.status !== "정상운영") return false;
     const inDate = (!startDate || (row.baseDate && row.baseDate >= startDate)) &&
                    (!endDate   || (row.baseDate && row.baseDate <= endDate));
     const inContractor = !contractorFilter || contractorFilter === "전체" || row.name.includes(contractorFilter);
@@ -824,7 +818,8 @@ function formatDateTime(v: string) {
 
 function statusClass(s: string) {
   if (s.includes("정상") || s.includes("완료")) return "green";
-  if (s.includes("오류") || s.includes("반려")) return "red";
+  if (s === "양도" || s === "양수") return "amber";
+  if (s.includes("오류") || s.includes("반려") || s === "계약해지") return "red";
   if (s.includes("대기") || s.includes("보류")) return "amber";
   return "blue";
 }
@@ -2139,8 +2134,9 @@ function AllowancePage({ rows }: { rows: ContractRowData[] }) {
   });
 
   const filteredRows = allowanceRows.filter((row) => {
+    if (row.status !== "정상운영") return false;
     if (!row.baseDate || !startDate || !endDate) return true;
-    
+
     // Parse filter days
     const filterStart = parseLocalDate(startDate);
     const filterEnd = parseLocalDate(endDate);
@@ -3276,6 +3272,7 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
     const fmtAmt = (v: string | undefined) => numFmt(v || "");
     return [
       { field: "계약번호", before: r?.no ?? "-", after: r?.no ?? "-", readOnlyAfter: true },
+      { field: "계약상태", before: r?.status || "정상운영", after: r?.status || "정상운영", readOnlyAfter: isAppt },
       ...(isAppt ? [] : [
         { field: "소속", before: r?.affiliation || "", after: r?.affiliation || "" },
         { field: "관리자", before: r?.managerName || "", after: r?.managerName || "" }
@@ -3347,6 +3344,7 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
           if (f.field === "근무여부") updateBody.workType = f.after;
           if (f.field === "소속") updateBody.affiliation = f.after;
           if (f.field === "관리자") updateBody.managerName = f.after;
+          if (f.field === "계약상태") updateBody.status = f.after;
         });
 
         const updateRes = await fetch(`/api/contracts/${row.id}`, {
@@ -3398,6 +3396,7 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
               if (f.field === "계좌번호") updatedRow.accountNo = f.after;
               if (f.field === "예금주명") updatedRow.accountHolder = f.after;
               if (f.field === "근무여부") updatedRow.workType = f.after;
+              if (f.field === "계약상태") updatedRow.status = f.after;
             });
             onUpdate(updatedRow);
           }
@@ -3434,7 +3433,13 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
               <td>{fc.field}</td>
               <td><span className="cell-text">{fc.before}</span></td>
               <td>
-                {fc.field === "근무여부" ? (
+                {fc.field === "계약상태" ? (
+                  fc.readOnlyAfter
+                    ? <input className="cell-input" value={fc.after} readOnly />
+                    : <select className="cell-select" value={fc.after} onChange={(e) => updateChangeField(idx, e.target.value)}>
+                        {CONTRACT_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                ) : fc.field === "근무여부" ? (
                   <select className="cell-select" value={fc.after} onChange={(e) => updateChangeField(idx, e.target.value)}>
                     <option value="4일근무">4일근무</option>
                     <option value="2일근무">2일근무</option>
@@ -3627,7 +3632,7 @@ export function App() {
             if (contractView === "detail") return <ContractDetail row={selectedContract} onBack={() => { loadContracts(); setContractView("list"); }} authUser={authUser} onUpdate={(updated) => setSelectedContract(updated)} />;
           }
           if (menu === "appointment") {
-            if (appointmentView === "list") return <AppointmentPage rows={contracts.filter(c => c.isAppointment || (c.type || "").includes("임용"))} onCreate={() => setAppointmentView("create")} onDetail={(r) => { setSelectedContract(r); setAppointmentView("detail"); }} onStatusChange={(id, status) => { fetch(`${API_BASE}/contracts/${id}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) }).then(r => r.json()).then(d => { if (d.ok) setContracts(prev => prev.map(c => c.id === id ? { ...c, status } : c)); }); }} />;
+            if (appointmentView === "list") return <AppointmentPage rows={contracts.filter(c => c.isAppointment || (c.type || "").includes("임용"))} onCreate={() => setAppointmentView("create")} onDetail={(r) => { setSelectedContract(r); setAppointmentView("detail"); }} />;
             if (appointmentView === "create") return <AppointmentCreate onBack={() => { loadContracts(); setAppointmentView("list"); }} />;
             if (appointmentView === "detail") return <ContractDetail row={selectedContract} onBack={() => { loadContracts(); setAppointmentView("list"); }} authUser={authUser} onUpdate={(updated) => setSelectedContract(updated)} />;
           }
