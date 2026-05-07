@@ -1970,6 +1970,8 @@ function ChangeHistoryPage() {
   const [contractType, setContractType] = useState("전체");
   const [rows, setRows] = useState<ChangeRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(20);
 
   const load = async () => {
     setLoading(true);
@@ -1982,6 +1984,7 @@ function ChangeHistoryPage() {
     const res = await fetch(`/api/changes?${params}`);
     const data = await res.json();
     setRows(data.rows || []);
+    setPage(1);
     setLoading(false);
   };
 
@@ -2090,6 +2093,20 @@ function ChangeHistoryPage() {
     URL.revokeObjectURL(url);
   };
 
+  const totalPages = Math.max(1, Math.ceil(rows.length / perPage));
+  const safePage = Math.min(page, totalPages);
+  const pagedRows = rows.slice((safePage - 1) * perPage, safePage * perPage);
+
+  const pageButtons = (): (number | "...")[] => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const pages: (number | "...")[] = [1];
+    if (safePage > 4) pages.push("...");
+    for (let i = Math.max(2, safePage - 2); i <= Math.min(totalPages - 1, safePage + 2); i++) pages.push(i);
+    if (safePage < totalPages - 3) pages.push("...");
+    pages.push(totalPages);
+    return pages;
+  };
+
   const renderFields = (r: ChangeRow, key: "field" | "before" | "after") => {
     const fields = Array.isArray(r.changed_fields) && r.changed_fields.length > 0 ? r.changed_fields : null;
     if (!fields) {
@@ -2133,6 +2150,7 @@ function ChangeHistoryPage() {
 
       <section className="card" style={{ marginTop: "12px" }}>
         <div className="card-title-sm">변경이력 {rows.length.toLocaleString("ko-KR")}건</div>
+        {loading && <div style={{ color: "#999", fontSize: "13px", marginBottom: "8px" }}>조회 중...</div>}
         <div style={{ overflowX: "auto" }}>
           <table className="grid" style={{ width: "100%", tableLayout: "auto" }}>
             <colgroup>
@@ -2164,7 +2182,7 @@ function ChangeHistoryPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {pagedRows.map((r) => (
                 <tr key={r.id}>
                   <td style={{ whiteSpace: "nowrap", fontSize: "12px" }}>{r.at ? fmtAt(r.at) : "-"}</td>
                   <td style={{ fontSize: "12px" }}>{r.is_appointment ? "임용" : "점주점장"}</td>
@@ -2197,8 +2215,27 @@ function ChangeHistoryPage() {
               {rows.length === 0 && !loading && (
                 <tr><td colSpan={11} style={{ textAlign: "center", color: "#999", padding: "24px" }}>조회 결과가 없습니다.</td></tr>
               )}
+              {loading && (
+                <tr><td colSpan={11} style={{ textAlign: "center", color: "#999", padding: "24px" }}>조회 중...</td></tr>
+              )}
             </tbody>
           </table>
+        </div>
+        <div className="contract-pagination">
+          <div className="pager">
+            <button className="pager-btn" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={safePage === 1}>‹</button>
+            {pageButtons().map((p, i) =>
+              p === "..." ? <span key={`el-${i}`} className="pager-ellipsis">…</span> : (
+                <button key={p} className={`pager-btn${safePage === p ? " active" : ""}`} onClick={() => setPage(p as number)}>{p}</button>
+              )
+            )}
+            <button className="pager-btn" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={safePage === totalPages}>›</button>
+          </div>
+          <div className="pager-right">
+            {[20, 50, 100].map((n) => (
+              <button key={n} className={`pager-btn${perPage === n ? " active" : ""}`} onClick={() => { setPerPage(n); setPage(1); }}>{n}개</button>
+            ))}
+          </div>
         </div>
       </section>
     </div>
