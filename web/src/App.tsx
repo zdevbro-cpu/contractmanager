@@ -53,6 +53,7 @@ type ContractRowData = {
   workType?: string;
   affiliation?: string;
   managerName?: string;
+  company?: string;
 };
 
 type MenuKey = "dashboard" | "contracts" | "appointment" | "referrers" | "allowances" | "salaries" | "account" | "changes" | "system" | "none";
@@ -130,7 +131,7 @@ function AppointmentListTable({ onDetail, rows, selectedNo, onSelect }: { onDeta
       <tbody>
         {rows.map((r) => (
           <tr key={r.id} data-row-no={r.no} onClick={() => onSelect?.(r)} onDoubleClick={() => onDetail(r)}
-            style={{ cursor: "pointer", background: selectedNo === r.no ? "#dbeafe" : undefined, outline: selectedNo === r.no ? "2px solid #3b82f6" : undefined, outlineOffset: "-2px" }}>
+            style={{ cursor: "pointer", background: selectedNo === r.no ? "#dbeafe" : undefined }}>
             <td>{r.name}</td>
             <td>{r.type}</td>
             <td>{r.ref}</td>
@@ -418,7 +419,7 @@ function AppointmentCreate({ onBack }: { onBack: () => void }) {
             <span>계약명</span>
             <select className="input-input" value={selectedType?.id ?? ""} onChange={(e) => {
               const id = Number(e.target.value);
-              const t = appointmentTypes.find((x) => x.id === id) ?? null;
+              const t = appointmentTypes.find((x) => Number(x.id) === id) ?? null;
               setSelectedType(t);
               if (!manualPayout) setPayoutDate(addMonths(contractDate, t?.payoutMonths ?? 2));
             }}>
@@ -819,6 +820,53 @@ function formatDateTime(v: string) {
   return `${y}-${m}-${day} ${h}:${min}`;
 }
 
+function toKoreanAmount(num: number): string {
+  if (!num || num === 0) return "-";
+  let n = Math.round(num);
+  let result = "";
+  const eok = Math.floor(n / 100000000); n %= 100000000;
+  const cheonman = Math.floor(n / 10000000); n %= 10000000;
+  const baekman = Math.floor(n / 1000000); n %= 1000000;
+  const sipman = Math.floor(n / 100000); n %= 100000;
+  const man = Math.floor(n / 10000); n %= 10000;
+  const cheon = Math.floor(n / 1000); n %= 1000;
+  const baek = Math.floor(n / 100); n %= 100;
+  const sip = Math.floor(n / 10); const il = n % 10;
+  if (eok > 0) result += `${eok}억`;
+  const manTotal = cheonman * 1000 + baekman * 100 + sipman * 10 + man;
+  if (manTotal > 0) {
+    if (cheonman > 0) result += `${cheonman}천`;
+    if (baekman > 0) result += `${baekman}백`;
+    if (sipman > 0) result += `${sipman}십`;
+    if (man > 0) result += `${man}`;
+    result += "만";
+  }
+  if (cheon > 0) result += `${cheon}천`;
+  if (baek > 0) result += `${baek}백`;
+  if (sip > 0) result += `${sip}십`;
+  if (il > 0) result += `${il}`;
+  return result + "원";
+}
+
+function fmtYYMMDD(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  const d = new Date(dateStr.slice(0, 10) + "T00:00:00");
+  if (isNaN(d.getTime())) return "";
+  return `${String(d.getFullYear()).slice(2)}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function subtractMonthsStr(dateStr: string, months: number): string {
+  if (!dateStr) return "";
+  const d = new Date(dateStr + "T00:00:00");
+  if (isNaN(d.getTime())) return "";
+  d.setMonth(d.getMonth() - months);
+  if (isNaN(d.getTime())) return "";
+  const yy = String(d.getFullYear()).slice(2);
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yy}.${mm}.${dd}`;
+}
+
 function statusClass(s: string) {
   if (s.includes("정상") || s.includes("완료")) return "green";
   if (s === "양도" || s === "양수" || s === "양도(영크)" || s === "양도(일부)" || s === "일부양도") return "amber";
@@ -965,12 +1013,12 @@ function ContractListTable({ onDetail, rows, selectedNo, onSelect }: { onDetail:
 
   return (
     <table className="grid contract-grid">
-      <thead><tr><th>소속</th><th>관리자</th><th className="center-th">계약자명</th><th>근무여부</th><th>계약종류</th><th>추천인</th><th>계약일자</th><th>수당지급일</th><th>계약종료일</th><th>보증금액</th><th>수당</th><th className="center-th">상태</th><th>상세</th></tr></thead>
+      <thead><tr><th>소속</th><th>지점</th><th>관리자</th><th className="center-th">계약자</th><th>계약서구분</th><th>계약일</th><th>수당지급일</th><th>계약종료</th><th>보증금</th><th>수당</th><th className="center-th">상태</th><th>상세</th></tr></thead>
       <tbody>
         {rows.map((r) => (
           <tr key={r.no} data-row-no={r.no} onClick={() => onSelect?.(r)} onDoubleClick={() => onDetail(r)}
-            style={{ cursor: "pointer", background: selectedNo === r.no ? "#dbeafe" : undefined, outline: selectedNo === r.no ? "2px solid #3b82f6" : undefined, outlineOffset: "-2px" }}>
-            <td>{r.affiliation || "-"}</td><td>{r.managerName || "-"}</td><td>{r.name}</td><td><input className="work-check" type="checkbox" defaultChecked={r.name !== "박지민"} onClick={(e) => e.stopPropagation()} /></td><td>{r.type}</td><td>{r.ref}</td><td>{r.contractDate}</td><td>{r.payoutDate}</td><td>{r.endDate}</td><td>{r.depositAmount}</td><td>{r.allowanceAmount}</td>
+            style={{ cursor: "pointer", background: selectedNo === r.no ? "#dbeafe" : undefined }}>
+            <td>{r.company || "-"}</td><td>{r.affiliation || "-"}</td><td>{r.managerName || "-"}</td><td>{r.name}</td><td>{r.type}</td><td>{r.contractDate}</td><td>{r.payoutDate}</td><td>{r.endDate}</td><td>{r.depositAmount}</td><td>{r.allowanceAmount}</td>
             <td><span className={`status-fixed ${statusClass(r.status || "")}`}>{compactStatus(r.status || "")}</span></td>
             <td><button className="icon-btn" onClick={(e) => { e.stopPropagation(); onDetail(r); }}><Eye size={14} /></button></td>
           </tr>
@@ -980,24 +1028,35 @@ function ContractListTable({ onDetail, rows, selectedNo, onSelect }: { onDetail:
   );
 }
 
+const _clSaved = { search: "", dateFrom: "", dateTo: "", dateMode: "계약일" as "계약일" | "변경일", page: 1, perPage: 20, contractFilter: "전체" as "전체" | "신규" | "변경" };
+
 function ContractList({ onCreate, onDetail, rows }: { onCreate: () => void; onDetail: (row: ContractRowData) => void; rows: ContractRowData[] }) {
-  const [search, setSearch] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [dateMode, setDateMode] = useState<"계약일" | "변경일">("계약일");
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(15);
+  const [search, _setSearch] = useState(_clSaved.search);
+  const [dateFrom, _setDateFrom] = useState(_clSaved.dateFrom);
+  const [dateTo, _setDateTo] = useState(_clSaved.dateTo);
+  const [dateMode, _setDateMode] = useState<"계약일" | "변경일">(_clSaved.dateMode);
+  const [page, _setPage] = useState(_clSaved.page);
+  const [perPage, _setPerPage] = useState(_clSaved.perPage);
   const [selectedNo, setSelectedNo] = useState<string | null>(null);
-  const [contractFilter, setContractFilter] = useState<"전체" | "신규" | "변경">("전체");
+  const [contractFilter, _setContractFilter] = useState<"전체" | "신규" | "변경">(_clSaved.contractFilter);
+  const setSearch = (v: string) => { _clSaved.search = v; _setSearch(v); };
+  const setDateFrom = (v: string) => { _clSaved.dateFrom = v; _setDateFrom(v); };
+  const setDateTo = (v: string) => { _clSaved.dateTo = v; _setDateTo(v); };
+  const setDateMode = (v: "계약일" | "변경일") => { _clSaved.dateMode = v; _setDateMode(v); };
+  const setPage = (v: number) => { _clSaved.page = v; _setPage(v); };
+  const setPerPage = (v: number) => { _clSaved.perPage = v; _setPerPage(v); };
+  const setContractFilter = (v: "전체" | "신규" | "변경") => { _clSaved.contractFilter = v; _setContractFilter(v); };
   const selectedNoRef = useRef<string | null>(null);
   const pagedRef = useRef<ContractRowData[]>([]);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const onDetailRef = useRef(onDetail);
   onDetailRef.current = onDetail;
+  const onCreateRef = useRef(onCreate);
+  onCreateRef.current = onCreate;
 
   const filtered = rows.filter((r) => {
     const q = search.trim().toLowerCase();
-    if (q && !r.no.toLowerCase().includes(q) && !r.name.toLowerCase().includes(q) && !(r.ref || "").toLowerCase().includes(q) && !(r.affiliation || "").toLowerCase().includes(q) && !(r.managerName || "").toLowerCase().includes(q)) return false;
+    if (q && !r.no.toLowerCase().includes(q) && !r.name.toLowerCase().includes(q) && !(r.company || "").toLowerCase().includes(q) && !(r.affiliation || "").toLowerCase().includes(q) && !(r.managerName || "").toLowerCase().includes(q)) return false;
     const targetDate = dateMode === "변경일" ? (r.updatedAt || r.createdAt || "") : r.contractDate;
     if (dateFrom && targetDate < dateFrom) return false;
     if (dateTo && targetDate > dateTo) return false;
@@ -1017,6 +1076,18 @@ function ContractList({ onCreate, onDetail, rows }: { onCreate: () => void; onDe
     const handleKeyDown = (e: KeyboardEvent) => {
       const current = pagedRef.current;
       const selNo = selectedNoRef.current;
+
+      if (e.key === "F2") {
+        e.preventDefault();
+        onCreateRef.current();
+        return;
+      }
+
+      if (e.key === "Escape" && document.activeElement === searchInputRef.current) {
+        setSearch("");
+        setPage(1);
+        return;
+      }
 
       if (e.key === "Enter" && selNo) {
         const row = current.find((r) => r.no === selNo);
@@ -1047,17 +1118,17 @@ function ContractList({ onCreate, onDetail, rows }: { onCreate: () => void; onDe
 
   const exportToExcel = async () => {
     const XLSX = await import("xlsx");
-    const headers = ["소속", "관리자", "계약자명", "근무여부", "계약종류", "추천인", "계약일자", "수당지급일", "계약종료일", "보증금액", "수당", "상태", "은행명", "계좌번호", "예금주"];
+    const headers = ["소속", "지점", "관리자", "계약자", "계약서구분", "계약일", "수당지급일", "계약종료", "보증금", "수당", "상태", "은행명", "계좌번호", "예금주"];
     const dataRows = filtered.map((r) => [
-      r.affiliation || "-", r.managerName || "-", r.name, r.workType || "-",
-      r.type, r.ref || "-", r.contractDate, r.payoutDate, r.endDate,
+      r.company || "-", r.affiliation || "-", r.managerName || "-", r.name,
+      r.type, r.contractDate, r.payoutDate, r.endDate,
       r.depositAmount, r.allowanceAmount, r.status,
       r.bankName || "-", r.accountNo || "-", r.accountHolder || "-",
     ]);
     const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
     ws["!cols"] = [
-      { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 20 },
-      { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 },
+      { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 20 },
+      { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 },
       { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 18 }, { wch: 12 },
     ];
     const wb = XLSX.utils.book_new();
@@ -1070,6 +1141,65 @@ function ContractList({ onCreate, onDetail, rows }: { onCreate: () => void; onDe
     a.download = `계약목록_${new Date().toISOString().slice(0, 10)}.xlsx`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  const exportStatement = async () => {
+    const XLSX = await import("xlsx");
+    try {
+      const res = await fetch(`${API_BASE}/contracts/statement`);
+      if (!res.ok) { alert("데이터 조회 실패"); return; }
+      const data = await res.json();
+      const rows: Array<{
+        name: string; type: string; contractDate: string; payoutDate: string;
+        depositAmount: number; managerName: string;
+        increases: Array<{ delta: number; applyMonth: string | null; at: string }>;
+      }> = data.rows || [];
+      if (rows.length === 0) { alert("출력할 데이터가 없습니다."); return; }
+
+      const managers = [...new Set(rows.map(r => r.managerName || "미지정"))];
+      const wb = XLSX.utils.book_new();
+
+      for (const manager of managers) {
+        const mRows = rows.filter(r => (r.managerName || "미지정") === manager);
+        const sheetData: (string | number)[][] = [
+          [`${manager} 계약서 목록`, "", "", "", "", ""],
+          ["No", "계약자", "계약서", "계약일자", "금액", "비고"],
+        ];
+        mRows.forEach((r, i) => {
+          const payDate = subtractMonthsStr(r.payoutDate, 2);
+          let amtText = `${toKoreanAmount(r.depositAmount)}(${fmtYYMMDD(r.contractDate)}.)`;
+          if (payDate) amtText = `${toKoreanAmount(r.depositAmount)}(${payDate}.)`;
+          for (const inc of r.increases) {
+            const incDate = inc.applyMonth
+              ? `${inc.applyMonth.slice(2, 4)}.${inc.applyMonth.slice(5, 7)}.01`
+              : fmtYYMMDD(inc.at ? inc.at.slice(0, 10) : "");
+            amtText += `\n증액: ${toKoreanAmount(inc.delta)}(${incDate}.)`;
+          }
+          sheetData.push([i + 1, r.name, r.type, fmtYYMMDD(r.contractDate), amtText, ""]);
+        });
+
+        const ws = XLSX.utils.aoa_to_sheet(sheetData);
+        ws["!cols"] = [{ wch: 5 }, { wch: 12 }, { wch: 16 }, { wch: 12 }, { wch: 36 }, { wch: 20 }];
+        ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }];
+        for (let ri = 2; ri < sheetData.length; ri++) {
+          const cellRef = XLSX.utils.encode_cell({ r: ri, c: 4 });
+          if (ws[cellRef]) ws[cellRef].s = { alignment: { wrapText: true, vertical: "top" } };
+        }
+        XLSX.utils.book_append_sheet(wb, ws, manager.slice(0, 31));
+      }
+
+      const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+      const blob = new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `계약서현황_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      alert("출력 중 오류가 발생했습니다.");
+    }
   };
 
   const pageButtons = (): (number | "...")[] => {
@@ -1089,7 +1219,7 @@ function ContractList({ onCreate, onDetail, rows }: { onCreate: () => void; onDe
         <div className="contract-filter-bar">
           <div className="search-box" style={{ position: "relative" }}>
             <Search size={16} />
-            <input ref={searchInputRef} className="input-input" placeholder="계약번호, 계약자명, 추천인, 소속, 관리자 검색" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} autoFocus />
+            <input ref={searchInputRef} className="input-input" placeholder="계약자명, 소속, 지점, 관리자, 계약번호 검색" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} autoFocus />
             {search && <button type="button" onClick={() => { setSearch(""); setPage(1); searchInputRef.current?.focus(); }} style={{ position: "absolute", right: "8px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#aaa", padding: "2px", display: "flex", alignItems: "center" }}><X size={14} /></button>}
           </div>
           <div style={{ display: "flex", border: "1px solid #dfe6f3", borderRadius: "8px", overflow: "hidden", flexShrink: 0 }}>{(["계약일", "변경일"] as const).map((m) => (<button key={m} type="button" onClick={() => { setDateMode(m); setPage(1); }} style={{ padding: "0 12px", height: "38px", border: "none", cursor: "pointer", fontSize: "13px", fontWeight: dateMode === m ? 600 : 400, background: dateMode === m ? "#1c75ff" : "#fff", color: dateMode === m ? "#fff" : "#5e6a83", transition: "all 0.15s" }}>{m}</button>))}</div><input className="date-filter-input" type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} />
@@ -1128,7 +1258,7 @@ function ContractList({ onCreate, onDetail, rows }: { onCreate: () => void; onDe
             <button className="pager-btn" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={safePage === totalPages}>›</button>
           </div>
           <div className="pager-right">
-            {[15, 50, 100].map((n) => (
+            {[20, 50, 100].map((n) => (
               <button key={n} className={`pager-btn${perPage === n ? " active" : ""}`} onClick={() => { setPerPage(n); setPage(1); }}>{n}개</button>
             ))}
           </div>
@@ -1168,6 +1298,7 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
   const [accountOwnerEdited, setAccountOwnerEdited] = useState(false);
   const [manualEnd, setManualEnd] = useState(false);
   const [endDateOverride, setEndDateOverride] = useState("");
+  const [company, setCompany] = useState("");
   const [affiliation, setAffiliation] = useState("");
   const [managerName, setManagerName] = useState("");
   const [contractNoInput, setContractNoInput] = useState("");
@@ -1221,7 +1352,7 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
   };
 
   const handleTypeChange = (id: number) => {
-    const t = contractTypes.find((x) => x.id === id) ?? null;
+    const t = contractTypes.find((x) => Number(x.id) === id) ?? null;
     setSelectedType(t);
     setManualAllowance(false);
     if (!manualPayout) setPayoutDate(addMonths(contractDate, t?.payoutMonths ?? 2));
@@ -1252,7 +1383,7 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
       return;
     }
     const body = {
-      contractNo,
+      contractNo: contractNoInput || null,
       type: selectedType?.name || "",
       name: contractorName,
       ref: referrers.find(r => String(r.id) === referrerId)?.name || "",
@@ -1269,6 +1400,7 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
       status: "승인대기",
       isAppointment: false,
       workFlag: workType !== "미근무",
+      company,
       affiliation,
       managerName
     };
@@ -1301,11 +1433,12 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
         alert("계약이 등록되었습니다.");
         onBack();
       } else {
-        alert("등록 중 오류가 발생했습니다.");
+        const errData = await res.json().catch(() => ({}));
+        alert(`등록 오류: ${(errData as any).message || res.status}`);
       }
     } catch (err) {
       console.error(err);
-      alert("서버 통신 오류가 발생했습니다.");
+      alert(`서버 통신 오류: ${String(err)}`);
     }
   };
 
@@ -1315,17 +1448,18 @@ function ContractCreate({ onBack }: { onBack: () => void }) {
 
       <section className="card">
         <div className="card-title-sm">기본정보</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "10px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: "10px" }}>
+          <label className="field"><span>소속</span><input className="input-input" tabIndex={1} autoFocus value={company} onChange={(e) => setCompany(e.target.value)} placeholder="소속 입력" /></label>
+          <label className="field"><span>관리지점</span><input className="input-input" tabIndex={2} value={affiliation} onChange={(e) => setAffiliation(e.target.value)} placeholder="지점 입력" /></label>
+          <label className="field"><span>관리자</span><input className="input-input" tabIndex={3} value={managerName} onChange={(e) => setManagerName(e.target.value)} placeholder="관리자명 입력" /></label>
           <label className="field">
             <span>계약명</span>
-            <select className="input-input" tabIndex={1} value={selectedType?.id ?? ""} onChange={(e) => handleTypeChange(Number(e.target.value))}>
+            <select className="input-input" tabIndex={4} value={selectedType?.id ?? ""} onChange={(e) => handleTypeChange(Number(e.target.value))}>
               {contractTypes.length === 0 && <option value="">계약서 없음 — 시스템관리에서 먼저 등록하세요</option>}
               {contractTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </label>
-          <label className="field"><span>계약번호</span><input className="input-input" tabIndex={2} value={contractNoInput} onChange={(e) => setContractNoInput(e.target.value)} placeholder={autoContractNo} /></label>
-          <label className="field"><span>관리자소속</span><input className="input-input" tabIndex={3} value={affiliation} onChange={(e) => setAffiliation(e.target.value)} placeholder="소속 입력" /></label>
-          <label className="field"><span>관리자</span><input className="input-input" tabIndex={4} value={managerName} onChange={(e) => setManagerName(e.target.value)} placeholder="관리자명 입력" /></label>
+          <label className="field"><span>계약번호</span><input className="input-input" tabIndex={5} value={contractNoInput} onChange={(e) => setContractNoInput(e.target.value)} placeholder={autoContractNo} /></label>
         </div>
       </section>
 
@@ -1503,7 +1637,8 @@ function DetailBasicTab({ row }: { row: ContractRowData | null }) {
           <tr><th>계약자명</th><td>{row?.name ?? "-"}</td><th>{row?.isAppointment ? "연봉" : "보증금"}</th><td>{row?.depositAmount || "-"}</td></tr>
           <tr><th>주민번호</th><td>{row?.residentRegistrationNumber || "-"}</td><th>{row?.isAppointment ? "급여일" : "첫수당지급일"}</th><td>{row?.payoutDate ?? "-"}</td></tr>
           <tr><th>연락처</th><td>{row?.phone || "-"}</td><th>계약상태</th><td>{row?.status ?? "정상운영"}</td></tr>
-          {!row?.isAppointment && <tr><th>소속</th><td>{row?.affiliation || "-"}</td><th>관리자</th><td>{row?.managerName || "-"}</td></tr>}
+          {!row?.isAppointment && <tr><th>소속</th><td>{row?.company || "-"}</td><th>지점</th><td>{row?.affiliation || "-"}</td></tr>}
+          {!row?.isAppointment && <tr><th>관리자</th><td colSpan={3}>{row?.managerName || "-"}</td></tr>}
         </tbody></table>
       </section>
       <section className="card" style={{ marginTop: "12px" }}>
@@ -1519,8 +1654,11 @@ function DetailBasicTab({ row }: { row: ContractRowData | null }) {
     </>
   );
 }
-function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
+function DetailDocumentTab({ row, authUser, onRefresh }: { row: ContractRowData | null; authUser: any; onRefresh: () => void }) {
   const [docs, setDocs] = useState<Array<{ id: number; originalName: string; reason: string; uploadedAt: string }>>([]);
+  const [uploading, setUploading] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  const isAdmin = authUser?.role === "시스템관리자";
 
   useEffect(() => {
     if (!row?.id) return;
@@ -1529,6 +1667,43 @@ function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
       .then((data) => setDocs(data.rows || []))
       .catch(() => {});
   }, [row?.id]);
+
+  const handleDelete = async (d: { id: number; originalName: string }) => {
+    if (!window.confirm(`"${d.originalName}" 파일을 삭제하시겠습니까?\n삭제된 파일은 목록에서 숨겨지며 복구할 수 없습니다.`)) return;
+    try {
+      const res = await fetch(`${API_BASE}/contracts/${row!.id}/documents/${d.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requester: authUser?.email || "관리자" }),
+      });
+      if (res.ok) { onRefresh(); }
+      else { alert("삭제 중 오류가 발생했습니다."); }
+    } catch { alert("서버 통신 오류가 발생했습니다."); }
+  };
+
+  const handleUpload = async (file: File) => {
+    if (!row?.id) return;
+    setUploading(true);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(",")[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const res = await fetch(`${API_BASE}/contracts/${row.id}/pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: file.name, data: base64, mimeType: file.type || "application/pdf", reason: "파일등록" }),
+      });
+      if (res.ok) { onRefresh(); }
+      else { const e = await res.json().catch(() => ({})); alert(`업로드 실패: ${(e as any).message || res.status}`); }
+    } catch { alert("서버 통신 오류가 발생했습니다."); }
+    finally {
+      setUploading(false);
+      if (uploadInputRef.current) uploadInputRef.current.value = "";
+    }
+  };
 
   return (
     <section className="card">
@@ -1541,12 +1716,12 @@ function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
             <table className="grid doc-table" style={{ tableLayout: "fixed", width: "100%" }}>
               <colgroup>
                 <col style={{ width: "120px" }} />
-                <col style={{ width: "410px" }} />
+                <col style={{ width: "380px" }} />
                 <col />
-                <col style={{ width: "80px" }} />
+                <col style={{ width: isAdmin ? "72px" : "44px" }} />
               </colgroup>
               <thead style={{ position: "sticky", top: 0, background: "#f8fafc", zIndex: 1 }}>
-                <tr><th>업로드일</th><th>파일명</th><th>사유</th><th>보기</th></tr>
+                <tr><th>업로드일</th><th>파일명</th><th>사유</th><th>관리</th></tr>
               </thead>
               <tbody>
                 {docs.map((d) => (
@@ -1555,10 +1730,20 @@ function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
                     <td style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.originalName}</td>
                     <td style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.reason}</td>
                     <td>
-                      <button className="line-btn" style={{ padding: "2px 8px" }}
-                        onClick={() => window.open(`${API_BASE}/contracts/${row!.id}/documents/${d.id}/pdf`, "_blank")}>
-                        보기
-                      </button>
+                      <div style={{ display: "flex", gap: "4px", justifyContent: "center" }}>
+                        <button title="보기"
+                          style={{ border: "none", background: "none", cursor: "pointer", color: "#1c75ff", padding: "4px", borderRadius: "6px", display: "flex", alignItems: "center" }}
+                          onClick={() => window.open(`${API_BASE}/contracts/${row!.id}/documents/${d.id}/pdf`, "_blank")}>
+                          <Eye size={16} />
+                        </button>
+                        {isAdmin && (
+                          <button title="삭제"
+                            style={{ border: "none", background: "none", cursor: "pointer", color: "#e53e3e", padding: "4px", borderRadius: "6px", display: "flex", alignItems: "center" }}
+                            onClick={() => handleDelete(d)}>
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1572,6 +1757,11 @@ function DetailDocumentTab({ row }: { row: ContractRowData | null }) {
               계약서보기
             </button>
           )}
+          <input ref={uploadInputRef} type="file" accept=".pdf,application/pdf" hidden
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); }} />
+          <button className="line-btn" disabled={uploading} onClick={() => uploadInputRef.current?.click()}>
+            {uploading ? "업로드 중..." : "파일 등록"}
+          </button>
         </div>
       </div>
     </section>
@@ -3391,11 +3581,13 @@ function SystemPage({
 
 function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowData | null; onBack: () => void; authUser: any; onUpdate?: (r: ContractRowData) => void }) {
   const [tab, setTab] = useState<DetailTab>("basic");
+  const [contractTypeNames, setContractTypeNames] = useState<string[]>([]);
   const [docsRefreshKey, setDocsRefreshKey] = useState(0);
   const [changeOpen, setChangeOpen] = useState(false);
   const [changeMemo, setChangeMemo] = useState("");
   const [changeFile, setChangeFile] = useState<File | null>(null);
   const changeFileRef = useRef<HTMLInputElement>(null);
+  const firstChangeInputRef = useRef<HTMLInputElement>(null);
   const getNextMonth = () => { const d = new Date(); d.setMonth(d.getMonth() + 1); return d.toISOString().slice(0, 7); };
   const getThisMonth = () => new Date().toISOString().slice(0, 7);
   const [applyMonth, setApplyMonth] = useState(getNextMonth());
@@ -3405,14 +3597,24 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
     if (!row?.id) return;
     fetch(`/api/contracts/${row.id}/history`)
       .then(res => res.json())
-      .then(data => {
-        if (data.rows) setChangeHistoryRows(data.rows);
-      })
+      .then(data => { if (data.rows) setChangeHistoryRows(data.rows); })
       .catch(() => {});
   }, [row?.id]);
 
   useEffect(() => {
+    fetch(`${API_BASE}/contract-types`)
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d.rows)) setContractTypeNames(d.rows.map((t: any) => t.name)); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "F2") {
+        e.preventDefault();
+        setTab("change");
+        return;
+      }
       if (e.key !== "Backspace") return;
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
@@ -3422,21 +3624,28 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onBack]);
 
+  useEffect(() => {
+    if (tab === "change") {
+      setTimeout(() => { firstChangeInputRef.current?.focus(); firstChangeInputRef.current?.select(); }, 0);
+    }
+  }, [tab]);
+
   const [historyDetailOpen, setHistoryDetailOpen] = useState(false);
   const [selectedHistory, setSelectedHistory] = useState<null | { at: string; before: string; after: string; reason: string; changedFields: Array<{ field: string; before: string; after: string }> }>(null);
   const buildChangeFields = (r: typeof row) => {
     const isAppt = r?.isAppointment ?? false;
     const fmtAmt = (v: string | undefined) => numFmt(v || "");
     return [
-      { field: "계약번호", before: r?.no ?? "-", after: r?.no ?? "-", readOnlyAfter: true },
+      { field: "계약번호", before: r?.no ?? "-", after: r?.no ?? "-" },
       { field: "계약상태", before: r?.status || "정상운영", after: r?.status || "정상운영" },
       ...(isAppt ? [] : [
-        { field: "소속", before: r?.affiliation || "", after: r?.affiliation || "" },
+        { field: "소속", before: r?.company || "", after: r?.company || "" },
+        { field: "지점", before: r?.affiliation || "", after: r?.affiliation || "" },
         { field: "관리자", before: r?.managerName || "", after: r?.managerName || "" }
       ]),
       { field: "계약자명", before: r?.name ?? "-", after: r?.name ?? "-" },
       { field: "추천인명", before: r?.ref || "-", after: r?.ref || "-" },
-      { field: "계약종류", before: r?.type ?? "-", after: r?.type ?? "-", readOnlyAfter: true },
+      { field: "계약종류", before: r?.type ?? "-", after: r?.type ?? "-" },
       { field: "계약일자", before: r?.contractDate ?? "", after: r?.contractDate ?? "" },
       { field: "수당지급일", before: r?.payoutDate ?? "", after: r?.payoutDate ?? "" },
       { field: "계약종료일", before: r?.endDate ?? "", after: r?.endDate ?? "" },
@@ -3485,7 +3694,9 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
         // 2. Update Actual Contract Data
         const updateBody: any = {};
         changed.forEach(f => {
+          if (f.field === "계약번호") updateBody.contractNo = f.after;
           if (f.field === "계약자명") updateBody.name = f.after;
+          if (f.field === "계약종류") updateBody.type = f.after;
           if (f.field === "추천인명") updateBody.ref = f.after;
           if (f.field === "계약일자") updateBody.contractDate = f.after;
           if (f.field === "수당지급일") updateBody.payoutDate = f.after;
@@ -3499,7 +3710,8 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
           if (f.field === "계좌번호") updateBody.accountNo = f.after;
           if (f.field === "예금주명") updateBody.accountHolder = f.after;
           if (f.field === "근무여부") updateBody.workType = f.after;
-          if (f.field === "소속") updateBody.affiliation = f.after;
+          if (f.field === "소속") updateBody.company = f.after;
+          if (f.field === "지점") updateBody.affiliation = f.after;
           if (f.field === "관리자") updateBody.managerName = f.after;
           if (f.field === "계약상태") updateBody.status = f.after;
         });
@@ -3539,7 +3751,9 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
           if (onUpdate && row) {
             const updatedRow = { ...row };
             changed.forEach(f => {
+              if (f.field === "계약번호") updatedRow.no = f.after;
               if (f.field === "계약자명") updatedRow.name = f.after;
+              if (f.field === "계약종류") updatedRow.type = f.after;
               if (f.field === "추천인명") updatedRow.ref = f.after;
               if (f.field === "계약일자") updatedRow.contractDate = f.after;
               if (f.field === "수당지급일") updatedRow.payoutDate = f.after;
@@ -3553,6 +3767,9 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
               if (f.field === "계좌번호") updatedRow.accountNo = f.after;
               if (f.field === "예금주명") updatedRow.accountHolder = f.after;
               if (f.field === "근무여부") updatedRow.workType = f.after;
+              if (f.field === "소속") updatedRow.company = f.after;
+              if (f.field === "지점") updatedRow.affiliation = f.after;
+              if (f.field === "관리자") updatedRow.managerName = f.after;
               if (f.field === "계약상태") updatedRow.status = f.after;
             });
             onUpdate(updatedRow);
@@ -3571,8 +3788,21 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
     }
   };
 
+  const handleChangeFieldKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const section = e.currentTarget.closest("section");
+    if (!section) return;
+    e.preventDefault();
+    const inputs = Array.from(section.querySelectorAll<HTMLInputElement>('input.cell-input:not([type="month"]):not([type="file"])'));
+    const idx = inputs.indexOf(e.currentTarget);
+    if (idx === -1) return;
+    const target = e.key === "ArrowDown" ? inputs[idx + 1] : inputs[idx - 1];
+    if (target) { target.focus(); target.select(); }
+  };
+
   const updateChangeField = (idx: number, val: string) =>
     setChangeFields((prev) => prev.map((x, i) => i === idx ? { ...x, after: val } : x));
+
 
   const changeTabContent = (
     <section className="card">
@@ -3590,7 +3820,12 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
               <td>{fc.field}</td>
               <td><span className="cell-text">{fc.before}</span></td>
               <td>
-                {fc.field === "계약상태" ? (
+                {fc.field === "계약종류" ? (
+                  <select className="cell-select" value={fc.after} onChange={(e) => updateChangeField(idx, e.target.value)}>
+                    {fc.after && !contractTypeNames.includes(fc.after) && <option value={fc.after}>{fc.after}</option>}
+                    {contractTypeNames.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                ) : fc.field === "계약상태" ? (
                   <select className="cell-select" value={fc.after} onChange={(e) => updateChangeField(idx, e.target.value)}>
                     {(row?.isAppointment ? APPOINTMENT_STATUS_OPTIONS : CONTRACT_STATUS_OPTIONS).map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
@@ -3607,15 +3842,24 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
                   </select>
                 ) : ["연봉", "보증금", "활동비", "수당"].includes(fc.field) ? (
                   <input className="cell-input" value={fc.after} readOnly={Boolean(fc.readOnlyAfter)}
+                    onFocus={(e) => e.target.select()}
+                    onKeyDown={handleChangeFieldKeyDown}
                     onChange={(e) => updateChangeField(idx, numFmt(e.target.value))} />
                 ) : fc.field === "연락처" ? (
                   <input className="cell-input" value={fc.after} readOnly={Boolean(fc.readOnlyAfter)}
+                    onFocus={(e) => e.target.select()}
+                    onKeyDown={handleChangeFieldKeyDown}
                     onChange={(e) => updateChangeField(idx, phoneFmt(e.target.value))} />
                 ) : fc.field === "주민번호" ? (
                   <input className="cell-input" value={fc.after} readOnly={Boolean(fc.readOnlyAfter)}
+                    onFocus={(e) => e.target.select()}
+                    onKeyDown={handleChangeFieldKeyDown}
                     onChange={(e) => updateChangeField(idx, rrnFmt(e.target.value))} />
                 ) : (
                   <input className="cell-input" value={fc.after} readOnly={Boolean(fc.readOnlyAfter)}
+                    ref={idx === 0 ? firstChangeInputRef : undefined}
+                    onFocus={(e) => e.target.select()}
+                    onKeyDown={handleChangeFieldKeyDown}
                     onChange={(e) => updateChangeField(idx, e.target.value)} />
                 )}
               </td>
@@ -3672,14 +3916,14 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
         </tfoot>
       </table>
       <div className="actions modal-actions">
-        <button className="line-btn" onClick={() => { setChangeFields(buildChangeFields(row)); setChangeMemo(""); setChangeFile(null); setApplyMonth(getNextMonth()); if (changeFileRef.current) changeFileRef.current.value = ""; }}>취소</button>
-        <button className="primary-btn" onClick={() => void saveChangeRequest()}>저장</button>
+        <button type="button" className="line-btn" onClick={() => { setChangeFields(buildChangeFields(row)); setChangeMemo(""); setChangeFile(null); setApplyMonth(getNextMonth()); if (changeFileRef.current) changeFileRef.current.value = ""; setTab("basic"); }}>취소</button>
+        <button type="button" className="primary-btn" onClick={() => void saveChangeRequest()}>저장</button>
       </div>
     </section>
   );
 
   const tabs: { key: DetailTab; label: string }[] = [{ key: "basic", label: "기본정보" }, { key: "document", label: "계약서" }, { key: "change", label: "계약변경" }, { key: "history", label: "변경이력" }];
-  const tabContent = tab === "basic" ? <DetailBasicTab row={row} /> : tab === "document" ? <DetailDocumentTab key={docsRefreshKey} row={row} /> : tab === "change" ? changeTabContent : <DetailHistoryTab rows={changeHistoryRows} onOpenDetail={(r) => { setSelectedHistory(r); setHistoryDetailOpen(true); }} />;
+  const tabContent = tab === "basic" ? <DetailBasicTab row={row} /> : tab === "document" ? <DetailDocumentTab key={docsRefreshKey} row={row} authUser={authUser} onRefresh={() => setDocsRefreshKey(k => k + 1)} /> : tab === "change" ? changeTabContent : <DetailHistoryTab rows={changeHistoryRows} onOpenDetail={(r) => { setSelectedHistory(r); setHistoryDetailOpen(true); }} />;
   return <div><div className="head-with-btn"><PageHeader title="계약 상세" desc="계약 정보를 확인하고 관리하세요." /><div className="actions"><button className="line-btn" onClick={onBack}>목록으로</button></div></div><section className="card summary-row"><div><div className="meta-label">계약번호</div><div className="meta-value">{row?.no ?? "-"}</div></div><div><div className="meta-label">계약자</div><div className="meta-value">{row?.name ?? "-"}</div></div><div><div className="meta-label">계약상태</div><div className="meta-value"><span className="badge green">{row?.status ?? "정상운영"}</span></div></div><div><div className="meta-label">계약일자</div><div className="meta-value">{row?.contractDate ?? "-"}</div></div><div><div className="meta-label">계약종료일</div><div className="meta-value">{row?.endDate ?? "-"}</div></div></section><div className="tabs">{tabs.map((t) => <button key={t.key} className={tab === t.key ? "tab active" : "tab"} onClick={() => setTab(t.key)}>{t.label}</button>)}</div>{tabContent}
   {historyDetailOpen && selectedHistory && (
     <div className="modal-backdrop" onClick={() => setHistoryDetailOpen(false)}>
@@ -3717,6 +3961,19 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
 }
 
 export function App() {
+  useEffect(() => {
+    const applyKoLang = () => {
+      const selector = 'input:not([type="date"]):not([type="month"]):not([type="number"]):not([type="email"]):not([type="password"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea';
+      document.querySelectorAll<HTMLElement>(selector).forEach((el) => {
+        if (el.getAttribute('lang') !== 'ko') el.setAttribute('lang', 'ko');
+      });
+    };
+    applyKoLang();
+    const obs = new MutationObserver(applyKoLang);
+    obs.observe(document.body, { childList: true, subtree: true });
+    return () => obs.disconnect();
+  }, []);
+
   const [users, setUsers] = useState<UserAccount[]>([
     { id: 1, email: "admin@las.com", role: "시스템관리자", state: "활성", password: "admin123" },
     { id: 2, email: "emp1@las.com", role: "운영자", state: "활성", password: "lasbook" },

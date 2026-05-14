@@ -208,7 +208,7 @@ button { font-family: inherit; }
 .chip.active { border-color: #1c75ff; color: #1c75ff; }
 .grid { width: 100%; border-collapse: collapse; font-size: 14px; }
 .grid th, .grid td { padding: 10px; border-bottom: 1px solid #eef2f8; text-align: left; white-space: nowrap; }
-.contract-grid th, .contract-grid td { padding: 7px 10px; }
+.contract-grid th, .contract-grid td { padding: 4px 10px; }
 .doc-table th, .doc-table td { padding: 10px 20px; }
 .contract-grid th { text-align: center; }
 .contract-grid th.center-th { text-align: center !important; }
@@ -310,6 +310,7 @@ button { font-family: inherit; }
   background: #fff;
   outline: none;
   transition: all 0.2s ease;
+  ime-mode: active;
 }
 .input-input:focus {
   border-color: #1c75ff;
@@ -568,6 +569,7 @@ button { font-family: inherit; }
   font-size: 13px;
   color: #1a2438;
   text-align: left;
+  ime-mode: active;
 }
 .change-input-grid .cell-input[readonly] {
   color: #5e6a83;

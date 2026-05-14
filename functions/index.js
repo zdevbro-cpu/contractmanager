@@ -54,7 +54,7 @@ function addYears(dateText, years) {
 function normalizeRows(rows) {
   return rows.map((row) => ({
     id: row.id,
-    no: row.contract_no ?? `LASM-${(toIsoDate(row.contract_date) || toIsoDate(row.first_allowance_date) || "2026-01-01").replaceAll("-", "")}-${String(row.id).padStart(3, "0")}`,
+    no: (row.contract_no && row.contract_no.trim()) ? row.contract_no : `LASM-${(toIsoDate(row.contract_date) || toIsoDate(row.first_allowance_date) || "2026-01-01").replaceAll("-", "")}-${String(row.id).padStart(3, "0")}`,
     name: row.contractor_name ?? "",
     ref: row.referrer_name ?? "",
     bankName: row.bank_name ?? "",
@@ -91,7 +91,8 @@ function normalizeRows(rows) {
     updatedAt: row.updated_at ? toIsoDate(row.updated_at) : "",
     workType: row.work_type || "4일근무",
     affiliation: row.affiliation ?? "",
-    managerName: row.manager_name ?? ""
+    managerName: row.manager_name ?? "",
+    company: row.company ?? ""
   }));
 }
 
@@ -115,8 +116,12 @@ async function ensureAppSchema() {
   await safeAlter("alter table contracts add column if not exists work_type text");
   await safeAlter("alter table contracts add column if not exists affiliation text");
   await safeAlter("alter table contracts add column if not exists manager_name text");
+  await safeAlter("alter table contracts add column if not exists company text");
+  await safeAlter("update contracts set company = 'A' where company is null and is_appointment = false");
+  await safeAlter("alter table contracts drop constraint if exists contracts_contract_no_key");
   await safeAlter("alter table contract_documents add column if not exists original_name text");
   await safeAlter("alter table contract_documents add column if not exists reason text");
+  await safeAlter("alter table contract_documents add column if not exists deleted_at timestamptz");
   await safeAlter("alter table contract_changes add column if not exists apply_month text");
   await safeAlter("alter table contract_changes add column if not exists applied boolean not null default false");
   await pool.query(`
@@ -213,6 +218,64 @@ app.post("/contracts/:id/memos", async (req, res) => {
   } catch (error) { res.status(500).json({ message: String(error) }); }
 });
 
+app.get("/contracts/statement", async (_req, res) => {
+  try {
+    await ensureAppSchema();
+    const contracts = await pool.query(`
+      select id, contractor_name, contract_name,
+             contract_date, first_allowance_date, deposit_amount,
+             manager_name, company, affiliation, status
+      from contracts
+      where is_appointment = false
+        and contractor_name is not null
+        and btrim(contractor_name) <> ''
+      order by manager_name nulls last, contractor_name, contract_date
+    `);
+    if (contracts.rows.length === 0) return res.json({ rows: [] });
+
+    const ids = contracts.rows.map(r => r.id);
+    const changes = await pool.query(`
+      select contract_id, changed_fields, apply_month, at
+      from contract_changes
+      where contract_id = any($1)
+        and changed_fields is not null
+      order by at asc
+    `, [ids]);
+
+    const incMap = {};
+    for (const ch of changes.rows) {
+      const fields = ch.changed_fields || [];
+      const df = fields.find(f => f.field === "보증금");
+      if (df) {
+        const before = Number(String(df.before).replace(/[^0-9]/g, ""));
+        const after  = Number(String(df.after).replace(/[^0-9]/g, ""));
+        if (after > before) {
+          if (!incMap[ch.contract_id]) incMap[ch.contract_id] = [];
+          incMap[ch.contract_id].push({ delta: after - before, applyMonth: ch.apply_month || null, at: ch.at });
+        }
+      }
+    }
+
+    const rows = contracts.rows.map(r => ({
+      id: r.id,
+      name: r.contractor_name,
+      type: r.contract_name || "",
+      contractDate: r.contract_date ? String(r.contract_date).slice(0, 10) : "",
+      payoutDate: r.first_allowance_date ? String(r.first_allowance_date).slice(0, 10) : "",
+      depositAmount: r.deposit_amount ?? 0,
+      managerName: r.manager_name || "",
+      company: r.company || "",
+      affiliation: r.affiliation || "",
+      status: r.status || "정상운영",
+      increases: incMap[r.id] || []
+    }));
+
+    res.json({ rows });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
+  }
+});
+
 app.get("/contracts", async (_req, res) => {
   try {
     await ensureAppSchema();
@@ -245,7 +308,8 @@ app.get("/contracts", async (_req, res) => {
         updated_at,
         work_type,
         affiliation,
-        manager_name
+        manager_name,
+        company
       from contracts
       where contractor_name is not null
         and btrim(contractor_name) <> ''
@@ -267,8 +331,8 @@ app.post("/contracts", async (req, res) => {
         referrer_name, contract_date, first_allowance_date, contract_end_date,
         deposit_amount, work_allowance, bank_name, account_no, account_holder,
         resident_registration_number, phone, is_appointment, insurance_type,
-        work_start_date, report_start_date, position, affiliation, manager_name
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+        work_start_date, report_start_date, position, affiliation, manager_name, company
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
       RETURNING id, contract_no`,
       [
         body.contractNo ?? null,
@@ -291,7 +355,8 @@ app.post("/contracts", async (req, res) => {
         body.reportStartDate ?? null,
         body.position ?? null,
         body.affiliation ?? null,
-        body.managerName ?? null
+        body.managerName ?? null,
+        body.company ?? null
       ]
     );
     res.json({ ok: true, id: result.rows[0].id, contractNo: result.rows[0].contract_no });
@@ -332,6 +397,8 @@ app.put("/contracts/:contractNo", async (req, res) => {
         affiliation = coalesce($22, affiliation),
         manager_name = coalesce($23, manager_name),
         status = coalesce($24, status),
+        company = coalesce($25, company),
+        contract_no = coalesce($26, contract_no),
         updated_at = now()
       where contract_no = $1 or id::text = $1 or id::text = split_part($1, '-', 3)
       returning contract_no
@@ -360,7 +427,9 @@ app.put("/contracts/:contractNo", async (req, res) => {
         body.workType || null,
         body.affiliation ?? null,
         body.managerName ?? null,
-        body.status ?? null
+        body.status ?? null,
+        body.company ?? null,
+        body.contractNo ?? null
       ]
     );
     if (result.rowCount === 0) {
@@ -596,7 +665,7 @@ app.get("/contracts/:id/documents", async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query(
-      "select id, storage_path, coalesce(original_name, original_file_name) as original_name, reason, created_at from contract_documents where contract_id = $1 order by created_at desc",
+      "select id, storage_path, coalesce(original_name, original_file_name) as original_name, reason, created_at from contract_documents where contract_id = $1 and deleted_at is null order by created_at desc",
       [id]
     );
     res.json({
@@ -608,6 +677,29 @@ app.get("/contracts/:id/documents", async (req, res) => {
         uploadedAt: r.created_at ? toIsoDate(r.created_at) : ""
       }))
     });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: String(error) });
+  }
+});
+
+app.delete("/contracts/:id/documents/:docId", async (req, res) => {
+  const { id, docId } = req.params;
+  const { requester } = req.body ?? {};
+  try {
+    await ensureAppSchema();
+    const docResult = await pool.query(
+      "select coalesce(original_name, original_file_name) as original_name from contract_documents where id = $1 and contract_id = $2 and deleted_at is null",
+      [docId, id]
+    );
+    if (docResult.rowCount === 0) return res.status(404).json({ ok: false, message: "Document not found" });
+    const originalName = docResult.rows[0].original_name || `doc-${docId}`;
+    await pool.query("update contract_documents set deleted_at = now() where id = $1", [docId]);
+    const changedFields = [{ field: "계약서 파일", before: originalName, after: "삭제됨" }];
+    await pool.query(
+      "insert into contract_changes (contract_id, before_text, after_text, reason, changed_fields) values ($1, $2, $3, $4, $5)",
+      [id, `계약서 파일:${originalName}`, "삭제됨", `파일 삭제 (${requester || "관리자"})`, JSON.stringify(changedFields)]
+    );
+    res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ ok: false, message: String(error) });
   }
@@ -754,7 +846,7 @@ app.get("/contract-types", async (_req, res) => {
   try {
     await ensureAppSchema();
     const result = await pool.query("select id, name, contract_years, payout_months, rules from contract_types order by id");
-    res.json({ rows: result.rows.map((r) => ({ id: r.id, name: r.name, contractYears: r.contract_years, payoutMonths: r.payout_months, rules: r.rules })) });
+    res.json({ rows: result.rows.map((r) => ({ id: Number(r.id), name: r.name, contractYears: r.contract_years, payoutMonths: r.payout_months, rules: r.rules })) });
   } catch (error) { res.status(500).json({ message: String(error) }); }
 });
 
