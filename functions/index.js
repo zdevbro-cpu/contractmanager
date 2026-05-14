@@ -3,9 +3,69 @@ const { onRequest } = require("firebase-functions/v2/https");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const pg = require("pg");
 const admin = require("firebase-admin");
+const { google } = require("googleapis");
 
 if (!admin.apps.length) admin.initializeApp();
 const bucket = admin.storage().bucket("contractmanager-pdf-storage");
+
+// ── Google Drive ────────────────────────────────────────────────────────
+const DRIVE_ROOT_FOLDER = "1HYwbkIyfxRiRTuJNTvcnW5SfZ-UqJ3nf";
+
+async function getDriveClient() {
+  const auth = new google.auth.GoogleAuth({
+    scopes: ["https://www.googleapis.com/auth/drive"],
+  });
+  const authClient = await auth.getClient();
+  return google.drive({ version: "v3", auth: authClient });
+}
+
+// Drive에서 파일을 스트리밍으로 가져와 응답에 파이핑
+async function streamDriveFile(fileId, res) {
+  const drive = await getDriveClient();
+  const meta = await drive.files.get({ fileId, fields: "name,mimeType" });
+  res.setHeader("Content-Type", meta.data.mimeType || "application/pdf");
+  res.setHeader("Content-Disposition", "inline");
+  const stream = await drive.files.get({ fileId, alt: "media" }, { responseType: "stream" });
+  stream.data.pipe(res);
+}
+
+// year 폴더 ID 조회 또는 생성
+async function getOrCreateYearFolder(drive, year) {
+  const q = `'${DRIVE_ROOT_FOLDER}' in parents and name = '${year}년' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+  const list = await drive.files.list({ q, fields: "files(id,name)", pageSize: 1 });
+  if (list.data.files.length > 0) return list.data.files[0].id;
+  const folder = await drive.files.create({
+    requestBody: { name: `${year}년`, mimeType: "application/vnd.google-apps.folder", parents: [DRIVE_ROOT_FOLDER] },
+    fields: "id",
+  });
+  return folder.data.id;
+}
+
+// Drive 폴더 아래 파일 전체 목록 재귀 조회
+async function listDriveFilesRecursive(drive, folderId) {
+  const results = [];
+  let pageToken = null;
+  do {
+    const q = `'${folderId}' in parents and trashed = false`;
+    const res = await drive.files.list({
+      q,
+      fields: "nextPageToken,files(id,name,mimeType,parents)",
+      pageSize: 1000,
+      pageToken: pageToken || undefined,
+    });
+    for (const f of res.data.files) {
+      if (f.mimeType === "application/vnd.google-apps.folder") {
+        const children = await listDriveFilesRecursive(drive, f.id);
+        results.push(...children);
+      } else {
+        results.push(f);
+      }
+    }
+    pageToken = res.data.nextPageToken;
+  } while (pageToken);
+  return results;
+}
+// ────────────────────────────────────────────────────────────────────────
 
 const { Pool } = pg;
 
@@ -122,6 +182,7 @@ async function ensureAppSchema() {
   await safeAlter("alter table contract_documents add column if not exists original_name text");
   await safeAlter("alter table contract_documents add column if not exists reason text");
   await safeAlter("alter table contract_documents add column if not exists deleted_at timestamptz");
+  await safeAlter("alter table contract_documents add column if not exists drive_file_id text");
   await safeAlter("alter table contract_changes add column if not exists apply_month text");
   await safeAlter("alter table contract_changes add column if not exists applied boolean not null default false");
   await pool.query(`
@@ -646,16 +707,38 @@ app.post("/contracts/:id/pdf", async (req, res) => {
     if (!filename || !data) return res.status(400).json({ ok: false, message: "filename, data 필수" });
 
     const buffer = Buffer.from(data, "base64");
-    const safeName = filename.replace(/[#\[\]*?]/g, "_");
-    const storagePath = `contracts/${id}/${Date.now()}_${safeName}`;
-    const file = bucket.file(storagePath);
-    await file.save(buffer, { metadata: { contentType: mimeType || "application/pdf" } });
+    const safeName = filename.replace(/[#[\]*?]/g, "_");
+
+    // Drive 업로드 시도, 실패 시 Firebase Storage fallback
+    let driveFileId = null;
+    let storagePath = null;
+    try {
+      const drive = await getDriveClient();
+      const contractRow = await pool.query("select first_allowance_date, contract_date from contracts where id = $1", [id]);
+      const dateVal = contractRow.rows[0]?.first_allowance_date || contractRow.rows[0]?.contract_date;
+      const year = dateVal ? new Date(dateVal).getFullYear() : new Date().getFullYear();
+      const yearFolderId = await getOrCreateYearFolder(drive, year);
+      const { Readable } = require("stream");
+      const stream = Readable.from(buffer);
+      const uploadRes = await drive.files.create({
+        requestBody: { name: safeName, parents: [yearFolderId] },
+        media: { mimeType: mimeType || "application/pdf", body: stream },
+        fields: "id",
+      });
+      driveFileId = uploadRes.data.id;
+    } catch (driveErr) {
+      // Drive 업로드 실패 시 Firebase Storage로 fallback
+      console.error("Drive upload failed, falling back to Firebase Storage:", driveErr.message);
+      storagePath = `contracts/${id}/${Date.now()}_${safeName}`;
+      const file = bucket.file(storagePath);
+      await file.save(buffer, { metadata: { contentType: mimeType || "application/pdf" } });
+    }
 
     await pool.query(
-      "insert into contract_documents (contract_id, storage_path, original_file_name, original_name, file_type, reason) values ($1, $2, $3, $3, 'CONTRACT_PDF', $4)",
-      [id, storagePath, filename, reason || "파일등록"]
+      "insert into contract_documents (contract_id, storage_path, original_file_name, original_name, file_type, reason, drive_file_id) values ($1, $2, $3, $3, 'CONTRACT_PDF', $4, $5)",
+      [id, storagePath || "", filename, reason || "파일등록", driveFileId]
     );
-    res.json({ ok: true, path: storagePath });
+    res.json({ ok: true, driveFileId, path: storagePath });
   } catch (error) {
     res.status(500).json({ ok: false, message: String(error) });
   }
@@ -665,14 +748,15 @@ app.get("/contracts/:id/documents", async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query(
-      "select id, storage_path, coalesce(original_name, original_file_name) as original_name, reason, created_at from contract_documents where contract_id = $1 and deleted_at is null order by created_at desc",
+      "select id, storage_path, drive_file_id, coalesce(original_name, original_file_name) as original_name, reason, created_at from contract_documents where contract_id = $1 and deleted_at is null order by created_at desc",
       [id]
     );
     res.json({
       rows: result.rows.map((r) => ({
         id: r.id,
         storagePath: r.storage_path,
-        originalName: r.original_name || r.storage_path.split("/").pop(),
+        driveFileId: r.drive_file_id || null,
+        originalName: r.original_name || (r.storage_path || "").split("/").pop(),
         reason: r.reason || "",
         uploadedAt: r.created_at ? toIsoDate(r.created_at) : ""
       }))
@@ -708,9 +792,15 @@ app.delete("/contracts/:id/documents/:docId", async (req, res) => {
 app.get("/contracts/:id/documents/:docId/pdf", async (req, res) => {
   const { docId } = req.params;
   try {
-    const result = await pool.query("select storage_path from contract_documents where id = $1", [docId]);
+    const result = await pool.query("select storage_path, drive_file_id from contract_documents where id = $1", [docId]);
     if (result.rowCount === 0) return res.status(404).send("Document not found");
-    const file = bucket.file(result.rows[0].storage_path);
+    const { storage_path, drive_file_id } = result.rows[0];
+
+    if (drive_file_id) {
+      return streamDriveFile(drive_file_id, res);
+    }
+    // Firebase Storage fallback
+    const file = bucket.file(storage_path);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", "inline");
     file.createReadStream().on("error", (err) => res.status(500).send(String(err))).pipe(res);
@@ -725,6 +815,107 @@ app.patch("/contracts/:id/pdf-path", async (req, res) => {
   try {
     await pool.query("update contracts set pdf_storage_path = $1 where id = $2", [pdfStoragePath, id]);
     res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: String(error) });
+  }
+});
+
+// ── Admin: Drive 파일 목록 조회 ──────────────────────────────────────────
+app.get("/admin/drive-files", async (_req, res) => {
+  try {
+    const drive = await getDriveClient();
+    const files = await listDriveFilesRecursive(drive, DRIVE_ROOT_FOLDER);
+    res.json({ count: files.length, files: files.map((f) => ({ id: f.id, name: f.name })) });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: String(error) });
+  }
+});
+
+// ── Admin: Drive 파일 ↔ DB 계약 자동 매칭 후 contract_documents 등록 ──
+app.post("/admin/drive-match", async (_req, res) => {
+  try {
+    await ensureAppSchema();
+    const drive = await getDriveClient();
+
+    // 1. Drive 파일 전체 목록
+    const driveFiles = await listDriveFilesRecursive(drive, DRIVE_ROOT_FOLDER);
+    const pdfFiles = driveFiles.filter((f) => f.name.toLowerCase().endsWith(".pdf"));
+
+    // 2. DB 계약 전체 목록
+    const dbResult = await pool.query(
+      "select id, contractor_name, first_allowance_date, contract_date from contracts where is_appointment = false and contractor_name is not null"
+    );
+    const contracts = dbResult.rows;
+
+    // 3. 이미 drive_file_id가 등록된 목록 (중복 방지)
+    const existingDrive = await pool.query("select drive_file_id from contract_documents where drive_file_id is not null");
+    const existingIds = new Set(existingDrive.rows.map((r) => r.drive_file_id));
+
+    const normalize = (s) => String(s || "").trim().replace(/\s+/g, "");
+
+    // 파일명에서 계약자명 추출: 계약서명_yyyymmdd_계약자명[_숫자].pdf
+    function extractFromFilename(name) {
+      const base = name.replace(/\.pdf$/i, "");
+      const parts = base.split("_");
+
+      // 마지막 부분이 순수 숫자면 (_1, _2 등) 앞에서 이름 찾기
+      let namePart = parts[parts.length - 1];
+      let datePart = parts[parts.length - 2];
+      if (/^\d+$/.test(namePart) && parts.length >= 4) {
+        namePart = parts[parts.length - 2];
+        datePart = parts[parts.length - 3];
+      }
+
+      // 이름 정리: 괄호 및 내용 전체 제거, 세미콜론/점 제거
+      const cleanName = namePart
+        .replace(/[（(（][^）)）]*[）)）]/g, "")
+        .replace(/[;.]/g, "")
+        .trim();
+
+      if (parts.length >= 3 && /^\d{8}$/.test(datePart)) {
+        const iso = `${datePart.slice(0,4)}-${datePart.slice(4,6)}-${datePart.slice(6,8)}`;
+        return { contractorName: cleanName, dateIso: iso };
+      }
+      return { contractorName: cleanName, dateIso: null };
+    }
+
+    const matched = [];
+    const unmatched = [];
+    const matchedContractIds = new Set();
+
+    for (const f of pdfFiles) {
+      if (existingIds.has(f.id)) continue;
+      const { contractorName, dateIso } = extractFromFilename(f.name);
+      const normName = normalize(contractorName);
+
+      // 이름 + 날짜로 매칭
+      let contract = null;
+      if (dateIso) {
+        contract = contracts.find(
+          (c) => normalize(c.contractor_name) === normName &&
+            !matchedContractIds.has(c.id) &&
+            (toIsoDate(c.first_allowance_date) === dateIso || toIsoDate(c.contract_date) === dateIso)
+        );
+      }
+      // 이름만으로 매칭 (유일한 경우)
+      if (!contract) {
+        const nameMatches = contracts.filter((c) => normalize(c.contractor_name) === normName && !matchedContractIds.has(c.id));
+        if (nameMatches.length === 1) contract = nameMatches[0];
+      }
+
+      if (contract) {
+        matchedContractIds.add(contract.id);
+        await pool.query(
+          "insert into contract_documents (contract_id, storage_path, original_file_name, original_name, file_type, reason, drive_file_id) values ($1, '', $2, $2, 'CONTRACT_PDF', 'Drive연동', $3)",
+          [contract.id, f.name, f.id]
+        );
+        matched.push({ driveFile: f.name, contractId: contract.id, contractorName: contract.contractor_name });
+      } else {
+        unmatched.push({ driveFile: f.name, extractedName: contractorName, dateIso });
+      }
+    }
+
+    res.json({ ok: true, matched: matched.length, unmatched: unmatched.length, unmatchedList: unmatched, matchedList: matched });
   } catch (error) {
     res.status(500).json({ ok: false, message: String(error) });
   }
