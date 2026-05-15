@@ -1431,6 +1431,9 @@ app.put("/contracts/:id/meta", async (req, res) => {
         transferred_from_id = $5
       where id = $1
     `, [id, !!verified, tags || [], meta_memo || null, transferred_from_id || null]);
+    if (transferred_from_id) {
+      await pool.query("update contracts set status = '양도' where id = $1", [Number(transferred_from_id)]);
+    }
     if (doc_id && page_range !== undefined) {
       await pool.query("update contract_documents set page_range = $1 where id = $2", [page_range || null, doc_id]);
     }

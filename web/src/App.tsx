@@ -3364,7 +3364,10 @@ function AuditPage() {
   const [transferResults, setTransferResults] = useState<{ id: number; contractor_name: string; contract_date: string }[]>([]);
   const [linkSearch, setLinkSearch] = useState("");
   const [linkResults, setLinkResults] = useState<{ id: string; name: string }[]>([]);
-  const [statusFilter, setStatusFilter] = useState<"전체" | "확인" | "미확인">("전체");
+  const [viewMode, setViewMode] = useState<"확정" | "남은 계약정보">("남은 계약정보");
+  const [specialFilter, setSpecialFilter] = useState<"전체" | "양수" | "합본" | "폐기">("전체");
+  const listRef = useRef<HTMLDivElement>(null);
+  const pendingEnterRef = useRef(false);
 
   useEffect(() => {
     setLoading(true);
@@ -3376,8 +3379,12 @@ function AuditPage() {
 
   const filtered = list.filter(c => {
     const matchSearch = !search || c.contractor_name.includes(search) || (c.referrer_name || "").includes(search);
-    const matchStatus = statusFilter === "전체" || (statusFilter === "확인" ? !!c.verified_at : !c.verified_at);
-    return matchSearch && matchStatus;
+    const matchView = viewMode === "확정" ? !!c.verified_at : !c.verified_at;
+    const matchSpecial = specialFilter === "전체" ||
+      (specialFilter === "양수" ? c.status === "양수" :
+       specialFilter === "폐기" ? c.status === "폐기" :
+       specialFilter === "합본" ? (c.tags || []).includes("합본") : true);
+    return matchSearch && matchView && matchSpecial;
   });
 
   const handleSelect = (c: AuditContract) => {
@@ -3397,7 +3404,16 @@ function AuditPage() {
     setLinkResults([]);
     fetch(`${API_BASE}/contracts/${c.id}/documents`)
       .then(r => r.json())
-      .then(d => setDocs(d.rows || []));
+      .then(d => {
+        const rows = d.rows || [];
+        setDocs(rows);
+        if (pendingEnterRef.current && rows.length > 0) {
+          pendingEnterRef.current = false;
+          setSelectedDocId(rows[0].id);
+          setMeta(m => ({ ...m, page_range: rows[0].page_range || "" }));
+          setPdfUrl(`${API_BASE}/contracts/${c.id}/documents/${rows[0].id}/pdf`);
+        }
+      });
   };
 
   const handleDocClick = (doc: AuditDoc) => {
@@ -3468,6 +3484,32 @@ function AuditPage() {
   const goPrev = () => { if (selectedIdx > 0) handleSelect(filtered[selectedIdx - 1]); };
   const goNext = () => { if (selectedIdx < filtered.length - 1) handleSelect(filtered[selectedIdx + 1]); };
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === "ArrowDown") { e.preventDefault(); goNext(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); goPrev(); }
+      else if (e.key === "Enter") {
+        e.preventDefault();
+        if (docs.length > 0) {
+          setSelectedDocId(docs[0].id);
+          setMeta(m => ({ ...m, page_range: docs[0].page_range || "" }));
+          setPdfUrl(`${API_BASE}/contracts/${selected!.id}/documents/${docs[0].id}/pdf`);
+        } else if (selected) {
+          pendingEnterRef.current = true;
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
+  useEffect(() => {
+    if (!selected || !listRef.current) return;
+    const el = listRef.current.querySelector(`[data-id="${selected.id}"]`) as HTMLElement;
+    if (el) el.scrollIntoView({ block: "nearest" });
+  }, [selected]);
+
   const fmt = (v: number | null) => v ? Number(v).toLocaleString("ko-KR") + " 원" : "-";
 
   return (
@@ -3480,23 +3522,32 @@ function AuditPage() {
             placeholder="계약자명 검색" autoFocus
             style={{ width: "100%", padding: "5px 8px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 12, boxSizing: "border-box" }}
           />
-          <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
-            {(["전체", "미확인", "확인"] as const).map(f => (
-              <button key={f} onClick={() => setStatusFilter(f)}
-                style={{ flex: 1, fontSize: 11, padding: "3px 0", borderRadius: 4, border: "1px solid #cbd5e1",
-                  background: statusFilter === f ? "#3b82f6" : "#fff", color: statusFilter === f ? "#fff" : "#374151", cursor: "pointer" }}>
+          <div style={{ display: "flex", gap: 3, marginTop: 6 }}>
+            {(["전체", "양수", "합본", "폐기"] as const).map(f => (
+              <button key={f} onClick={() => setSpecialFilter(f)}
+                style={{ flex: 1, fontSize: 10, padding: "3px 0", borderRadius: 4, border: "1px solid #cbd5e1",
+                  background: specialFilter === f ? "#6366f1" : "#fff", color: specialFilter === f ? "#fff" : "#374151", cursor: "pointer" }}>
                 {f}
               </button>
             ))}
           </div>
+          <div style={{ display: "flex", gap: 3, marginTop: 4 }}>
+            {(["남은 계약정보", "확정"] as const).map(v => (
+              <button key={v} onClick={() => setViewMode(v)}
+                style={{ flex: 1, fontSize: 10, padding: "3px 0", borderRadius: 4, border: "1px solid #cbd5e1",
+                  background: viewMode === v ? "#3b82f6" : "#fff", color: viewMode === v ? "#fff" : "#374151", cursor: "pointer" }}>
+                {v}
+              </button>
+            ))}
+          </div>
           <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
-            {filtered.length}건 / 확인 {filtered.filter(c => c.verified_at).length}건
+            {filtered.length}건 / 전체 {list.filter(c => !c.verified_at).length}건 남음
           </div>
         </div>
-        <div style={{ flex: 1, overflowY: "auto" }}>
+        <div ref={listRef} style={{ flex: 1, overflowY: "auto" }}>
           {loading && <div style={{ padding: 16, textAlign: "center", color: "#94a3b8", fontSize: 12 }}>불러오는 중...</div>}
           {filtered.map((c, i) => (
-            <div key={c.id} onClick={() => handleSelect(c)}
+            <div key={c.id} data-id={c.id} onClick={() => handleSelect(c)}
               style={{ padding: "7px 10px", cursor: "pointer", borderBottom: "1px solid #f1f5f9",
                 background: selected?.id === c.id ? "#eff6ff" : "transparent",
                 borderLeft: selected?.id === c.id ? "3px solid #3b82f6" : "3px solid transparent" }}>
