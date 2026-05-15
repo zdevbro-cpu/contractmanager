@@ -72,7 +72,7 @@ const { Pool } = pg;
 setGlobalOptions({ region: "asia-northeast3", maxInstances: 10 });
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 app.use((req, _res, next) => {
   while (req.url.startsWith("/api/")) req.url = req.url.slice(4);
   if (req.url === "/api") req.url = "/";
@@ -109,6 +109,16 @@ function addYears(dateText, years) {
   if (Number.isNaN(d.getTime())) return "2026-01-01";
   d.setFullYear(d.getFullYear() + years);
   return d.toISOString().slice(0, 10);
+}
+
+function excelDateToIso(val) {
+  if (!val) return null;
+  if (typeof val === "number") {
+    const d = new Date((val - 25569) * 86400 * 1000);
+    return d.toISOString().slice(0, 10);
+  }
+  if (typeof val === "string" && /^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
+  return null;
 }
 
 function normalizeRows(rows) {
@@ -183,6 +193,11 @@ async function ensureAppSchema() {
   await safeAlter("alter table contract_documents add column if not exists reason text");
   await safeAlter("alter table contract_documents add column if not exists deleted_at timestamptz");
   await safeAlter("alter table contract_documents add column if not exists drive_file_id text");
+  await safeAlter("alter table contract_documents add column if not exists page_range text");
+  await safeAlter("alter table contracts add column if not exists verified_at timestamptz");
+  await safeAlter("alter table contracts add column if not exists tags text[]");
+  await safeAlter("alter table contracts add column if not exists meta_memo text");
+  await safeAlter("alter table contracts add column if not exists transferred_from_id bigint");
   await safeAlter("alter table contract_changes add column if not exists apply_month text");
   await safeAlter("alter table contract_changes add column if not exists applied boolean not null default false");
   await pool.query(`
@@ -503,6 +518,16 @@ app.put("/contracts/:contractNo", async (req, res) => {
   }
 });
 
+app.delete("/contracts/all", async (_req, res) => {
+  try {
+    await ensureAppSchema();
+    const result = await pool.query("delete from contracts returning id");
+    res.json({ ok: true, deleted: result.rowCount });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
+  }
+});
+
 app.delete("/contracts/appointments/clear", async (_req, res) => {
   try {
     await ensureAppSchema();
@@ -633,6 +658,117 @@ app.delete("/changes/:id", async (req, res) => {
   }
 });
 
+// ── Staging & Drive Verification ──────────────────────────────────────────
+
+app.get("/drive/files", async (_req, res) => {
+  try {
+    const drive = await getDriveClient();
+    const files = await listDriveFilesRecursive(drive, DRIVE_ROOT_FOLDER);
+    res.json({ rows: files });
+  } catch (error) {
+    // Fallback to drive_all.json if API fails
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      const driveAllPath = path.join(__dirname, "..", "drive_all.json");
+      if (fs.existsSync(driveAllPath)) {
+        const data = JSON.parse(fs.readFileSync(driveAllPath, "utf8"));
+        return res.json({ rows: data.files || [] });
+      }
+    } catch (e) {}
+    res.status(500).json({ message: String(error) });
+  }
+});
+
+app.get("/drive/stream/:fileId", async (req, res) => {
+  const { fileId } = req.params;
+  try {
+    await streamDriveFile(fileId, res);
+  } catch (error) {
+    res.status(500).send(String(error));
+  }
+});
+
+app.post("/staging/import", async (req, res) => {
+  const { filePath } = req.body;
+  if (!filePath) return res.status(400).json({ message: "filePath required" });
+  
+  const fs = require("fs");
+  const xlsx = require("xlsx");
+  if (!fs.existsSync(filePath)) return res.status(404).json({ message: "file not found" });
+
+  try {
+    const wb = xlsx.readFile(filePath);
+    const sheetName = wb.SheetNames[0];
+    const ws = wb.Sheets[sheetName];
+    const data = xlsx.utils.sheet_to_json(ws, { header: 1 });
+    
+    // Headers: ['', '계약구분', '소속', '추천인', '성명', '보증금(원)', '수익금(원)', '최초지급일', '계약일', '은행명', '계좌번호', '예금주', '주민등록번호', '핸드폰번호', '계약만료일', '계약서번호', '현금/카드', '비고']
+    const rows = [];
+    for (let i = 1; i < data.length; i++) {
+      const r = data[i];
+      if (!r || !r[4]) continue; // Skip if no name
+      rows.push({
+        status: r[0],
+        type: r[1],
+        affiliation: r[2],
+        ref: r[3],
+        name: r[4],
+        deposit: r[5],
+        allowance: r[6],
+        payoutDate: excelDateToIso(r[7]),
+        contractDate: excelDateToIso(r[8]),
+        bankName: r[9],
+        accountNo: r[10],
+        accountHolder: r[11],
+        rrn: r[12],
+        phone: r[13],
+        endDate: excelDateToIso(r[14]),
+        no: r[15],
+        remarks: r[17]
+      });
+    }
+
+    await pool.query("delete from staging_contract_rows");
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      await pool.query(
+        `insert into staging_contract_rows 
+         (batch_id, row_no, contract_no, contract_name, contractor_name, first_allowance_date, raw_payload)
+         values (0, $1, $2, $3, $4, $5, $6)`,
+        [i + 1, r.no || null, r.type || null, r.name, r.payoutDate || null, JSON.stringify(r)]
+      );
+    }
+
+    res.json({ ok: true, count: rows.length });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
+  }
+});
+
+app.get("/staging/search", async (req, res) => {
+  const { name } = req.query;
+  if (!name) return res.json({ rows: [] });
+  try {
+    const result = await pool.query(
+      "select * from staging_contract_rows where contractor_name ilike $1 order by row_no",
+      [`%${name}%`]
+    );
+    res.json({ rows: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
+  }
+});
+
+app.delete("/staging/clear", async (_req, res) => {
+  try {
+    await pool.query("delete from staging_contract_rows");
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: String(error) });
+  }
+});
+
 app.get("/contracts/:id/pdf", async (req, res) => {
   const { id } = req.params;
   try {
@@ -643,16 +779,22 @@ app.get("/contracts/:id/pdf", async (req, res) => {
 
     // contract_documents에서 최신 파일 조회
     const docResult = await pool.query(
-      "select storage_path from contract_documents where contract_id = $1 order by created_at desc limit 1",
+      "select storage_path, drive_file_id from contract_documents where contract_id = $1 and deleted_at is null order by created_at desc limit 1",
       [id]
     );
     if (docResult.rowCount > 0) {
-      const file = bucket.file(docResult.rows[0].storage_path);
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", "inline");
-      return file.createReadStream()
-        .on("error", (err) => res.status(500).send(String(err)))
-        .pipe(res);
+      const { storage_path, drive_file_id } = docResult.rows[0];
+      if (drive_file_id) {
+        return streamDriveFile(drive_file_id, res);
+      }
+      if (storage_path) {
+        const file = bucket.file(storage_path);
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", "inline");
+        return file.createReadStream()
+          .on("error", (err) => res.status(500).send(String(err)))
+          .pipe(res);
+      }
     }
 
     // 레거시 fallback: pdf_storage_path 직접 사용
@@ -748,7 +890,7 @@ app.get("/contracts/:id/documents", async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query(
-      "select id, storage_path, drive_file_id, coalesce(original_name, original_file_name) as original_name, reason, created_at from contract_documents where contract_id = $1 and deleted_at is null order by created_at desc",
+      "select id, storage_path, drive_file_id, coalesce(original_name, original_file_name) as original_name, reason, created_at from contract_documents where contract_id = $1 and deleted_at is null order by coalesce(original_name, original_file_name) asc, created_at asc",
       [id]
     );
     res.json({
@@ -831,6 +973,145 @@ app.get("/admin/drive-files", async (_req, res) => {
   }
 });
 
+// ── Admin: 엑셀 일괄 등록 + Drive 자동 매칭 ──
+app.post("/admin/import-excel", async (req, res) => {
+  try {
+    await ensureAppSchema();
+    const { data } = req.body || {};
+    if (!data) return res.status(400).json({ ok: false, message: "data 필수" });
+
+    const XLSX = require("xlsx");
+    const buffer = Buffer.from(data, "base64");
+    const wb = XLSX.read(buffer, { type: "buffer" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+
+    function excelDateToIso(val) {
+      if (!val || typeof val !== "number") return null;
+      const d = XLSX.SSF.parse_date_code(val);
+      if (!d) return null;
+      return `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`;
+    }
+
+    // 헤더 행(0번) 제외, 계약구분 === 'LAS매장점주' & 성명 있는 행만
+    const dataRows = rows.slice(1).filter(r => String(r[1] || "").trim() === "LAS매장점주" && String(r[4] || "").trim());
+
+    const inserted = [];
+    const skipped = [];
+
+    for (const row of dataRows) {
+      const note     = String(row[0] || "").trim();
+      const name     = String(row[4] || "").trim();
+      const deposit  = typeof row[5] === "number" ? row[5] : null;
+      const allowance = typeof row[6] === "number" ? row[6] : null;
+      const firstAllowanceDate = excelDateToIso(row[7]);
+      const contractDate       = excelDateToIso(row[8]);
+      const bankName    = String(row[9]  || "").trim() || null;
+      const accountNo   = String(row[10] || "").trim() || null;
+      const accountHolder = String(row[11] || "").trim() || null;
+      const ssn         = String(row[12] || "").trim() || null;
+      const phone       = String(row[13] || "").trim() || null;
+      const endDate     = excelDateToIso(row[14]);
+      const contractNo  = String(row[15] || "").trim() || null;
+      const referrer    = String(row[3]  || "").trim() || null;
+      const affiliation = String(row[2]  || "").trim() || null;
+      const remarks     = String(row[17] || "").trim() || null;
+
+      let status = "정상운영";
+      if (note.includes("폐기")) status = "폐기";
+      else if (note.includes("양도")) status = "양도";
+      else if (note.includes("양수")) status = "양수";
+      else if (note.includes("증액")) status = "증액";
+      else if (note.includes("감액")) status = "감액";
+
+      if (!name || !contractDate) { skipped.push({ name, reason: "이름·계약일 없음" }); continue; }
+
+      const dup = await pool.query(
+        "SELECT id FROM contracts WHERE contractor_name = $1 AND contract_date::date = $2::date",
+        [name, contractDate]
+      );
+      if (dup.rowCount > 0) { skipped.push({ name, contractDate, reason: "중복" }); continue; }
+
+      const r = await pool.query(
+        `INSERT INTO contracts (
+          contract_no, contractor_name, contract_name, referrer_name,
+          contract_date, first_allowance_date, contract_end_date,
+          deposit_amount, work_allowance, bank_name, account_no, account_holder,
+          resident_registration_number, phone, affiliation, status, remarks, is_appointment
+        ) VALUES ($1,$2,'LAS매장점주',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,false)
+        RETURNING id`,
+        [contractNo, name, referrer, contractDate, firstAllowanceDate, endDate,
+         deposit, allowance, bankName, accountNo, accountHolder, ssn, phone, affiliation, status, remarks]
+      );
+      inserted.push({ id: Number(r.rows[0].id), name, contractDate, firstAllowanceDate });
+    }
+
+    // 신규 등록된 계약에 대해 Drive 자동 매칭
+    let driveMatched = 0;
+    if (inserted.length > 0) {
+      try {
+        const drive = await getDriveClient();
+        const driveFiles = await listDriveFilesRecursive(drive, DRIVE_ROOT_FOLDER);
+        const pdfFiles = driveFiles.filter(f => f.name.toLowerCase().endsWith(".pdf"));
+        const existingDrive = await pool.query("SELECT drive_file_id FROM contract_documents WHERE drive_file_id IS NOT NULL");
+        const existingIds = new Set(existingDrive.rows.map(r => r.drive_file_id));
+
+        const normalize = s => String(s || "").trim().replace(/\s+/g, "");
+        const dateDiffDays = (a, b) => !a || !b ? Infinity : Math.abs(new Date(a) - new Date(b)) / 86400000;
+
+        function extractName(filename) {
+          const base = filename.replace(/\.pdf$/i, "");
+          const parts = base.split("_");
+          let namePart = parts[parts.length - 1];
+          if (/^\d+$/.test(namePart) && parts.length >= 4) namePart = parts[parts.length - 2];
+          return namePart.replace(/[（(（][^）)）]*[）)）]/g, "").replace(/[;.]/g, "").trim();
+        }
+        function extractDate(filename) {
+          const base = filename.replace(/\.pdf$/i, "");
+          const parts = base.split("_");
+          let namePart = parts[parts.length - 1];
+          let datePart = parts[parts.length - 2];
+          if (/^\d+$/.test(namePart) && parts.length >= 4) datePart = parts[parts.length - 3];
+          return /^\d{8}$/.test(datePart)
+            ? `${datePart.slice(0,4)}-${datePart.slice(4,6)}-${datePart.slice(6,8)}`
+            : null;
+        }
+
+        for (const f of pdfFiles) {
+          if (existingIds.has(f.id)) continue;
+          const driveName = normalize(extractName(f.name));
+          const driveDate = extractDate(f.name);
+
+          const candidate = inserted.find(c => {
+            if (normalize(c.name) !== driveName) return false;
+            if (driveDate) {
+              return c.contractDate === driveDate ||
+                     c.firstAllowanceDate === driveDate ||
+                     dateDiffDays(c.firstAllowanceDate, driveDate) <= 7;
+            }
+            return true;
+          });
+
+          if (candidate) {
+            await pool.query(
+              "INSERT INTO contract_documents (contract_id, storage_path, original_file_name, original_name, file_type, reason, drive_file_id) VALUES ($1,'', $2, $2, 'CONTRACT_PDF', 'Drive연동', $3)",
+              [candidate.id, f.name, f.id]
+            );
+            existingIds.add(f.id);
+            driveMatched++;
+          }
+        }
+      } catch (e) {
+        console.error("Drive match 오류:", e.message);
+      }
+    }
+
+    res.json({ ok: true, inserted: inserted.length, skipped: skipped.length, driveMatched, skippedList: skipped });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: String(error) });
+  }
+});
+
 // ── Admin: Drive 파일 ↔ DB 계약 자동 매칭 후 contract_documents 등록 ──
 app.post("/admin/drive-match", async (_req, res) => {
   try {
@@ -883,12 +1164,17 @@ app.post("/admin/drive-match", async (_req, res) => {
     const unmatched = [];
     const matchedContractIds = new Set();
 
+    const dateDiffDays = (isoA, isoB) => {
+      if (!isoA || !isoB) return Infinity;
+      return Math.abs(new Date(isoA) - new Date(isoB)) / 86400000;
+    };
+
     for (const f of pdfFiles) {
       if (existingIds.has(f.id)) continue;
       const { contractorName, dateIso } = extractFromFilename(f.name);
       const normName = normalize(contractorName);
 
-      // 이름 + 날짜로 매칭
+      // 1순위: 이름 + 정확한 날짜 매칭 (계약일 또는 최초수당지급일)
       let contract = null;
       if (dateIso) {
         contract = contracts.find(
@@ -897,10 +1183,29 @@ app.post("/admin/drive-match", async (_req, res) => {
             (toIsoDate(c.first_allowance_date) === dateIso || toIsoDate(c.contract_date) === dateIso)
         );
       }
-      // 이름만으로 매칭 (유일한 경우)
+      // 2순위: 이름 + 최초수당지급일 ±7일 퍼지 매칭 (후보 1건일 때만)
+      if (!contract && dateIso) {
+        const candidates = contracts.filter(
+          (c) => normalize(c.contractor_name) === normName &&
+            !matchedContractIds.has(c.id) &&
+            dateDiffDays(toIsoDate(c.first_allowance_date), dateIso) <= 7
+        );
+        if (candidates.length === 1) contract = candidates[0];
+      }
+      // 3순위: 이름만으로 매칭 (유일한 경우)
       if (!contract) {
         const nameMatches = contracts.filter((c) => normalize(c.contractor_name) === normName && !matchedContractIds.has(c.id));
         if (nameMatches.length === 1) contract = nameMatches[0];
+      }
+      // 4순위: 동일인 다중계약 → 날짜 가장 가까운 계약에 연결 (±60일)
+      if (!contract) {
+        const nameMatches = contracts.filter((c) => normalize(c.contractor_name) === normName && !matchedContractIds.has(c.id));
+        if (nameMatches.length > 1 && dateIso) {
+          const sorted = nameMatches
+            .map(c => ({ c, diff: Math.min(dateDiffDays(toIsoDate(c.first_allowance_date), dateIso), dateDiffDays(toIsoDate(c.contract_date), dateIso)) }))
+            .sort((a, b) => a.diff - b.diff);
+          if (sorted[0].diff <= 60) contract = sorted[0].c;
+        }
       }
 
       if (contract) {
@@ -1087,6 +1392,76 @@ app.post("/account/verify", (req, res) => {
     return;
   }
   res.json({ exists: true, ownerMatch: true, ownerName: normalizedOwner, message: "실명 일치" });
+});
+
+// 대사 작업용 계약 목록 (PDF 연결 여부, 확인 여부 포함)
+app.get("/admin/audit-list", async (_req, res) => {
+  try {
+    await ensureAppSchema();
+    const result = await pool.query(`
+      select c.id, c.contractor_name, c.status, c.contract_name,
+        to_char(c.contract_date,'YYYY-MM-DD') contract_date,
+        to_char(c.first_allowance_date,'YYYY-MM-DD') first_allowance_date,
+        c.deposit_amount, c.work_allowance, c.referrer_name, c.affiliation,
+        c.bank_name, c.account_no, c.account_holder, c.phone, c.remarks,
+        c.verified_at, c.tags, c.meta_memo, c.transferred_from_id,
+        count(d.id) filter (where d.deleted_at is null) as doc_count,
+        (select contractor_name from contracts where id = c.transferred_from_id) as transferred_from_name
+      from contracts c
+      left join contract_documents d on d.contract_id = c.id
+      where c.is_appointment = false
+      group by c.id
+      order by c.first_allowance_date asc nulls last, c.id asc
+    `);
+    res.json({ rows: result.rows });
+  } catch (error) { res.status(500).json({ message: String(error) }); }
+});
+
+// 계약 메타 저장 (대사 작업용)
+app.put("/contracts/:id/meta", async (req, res) => {
+  try {
+    await ensureAppSchema();
+    const { id } = req.params;
+    const { verified, tags, meta_memo, transferred_from_id, page_range, doc_id } = req.body ?? {};
+    await pool.query(`
+      update contracts set
+        verified_at = case when $2::boolean then coalesce(verified_at, now()) else null end,
+        tags = $3::text[],
+        meta_memo = $4,
+        transferred_from_id = $5
+      where id = $1
+    `, [id, !!verified, tags || [], meta_memo || null, transferred_from_id || null]);
+    if (doc_id && page_range !== undefined) {
+      await pool.query("update contract_documents set page_range = $1 where id = $2", [page_range || null, doc_id]);
+    }
+    res.json({ ok: true });
+  } catch (error) { res.status(500).json({ message: String(error) }); }
+});
+
+// Drive 파일 검색 (관리자용)
+app.post("/admin/drive-search", async (req, res) => {
+  try {
+    const { query } = req.body ?? {};
+    if (!query) return res.status(400).json({ error: "query required" });
+    const drive = await getDriveClient();
+    const allFiles = await listDriveFilesRecursive(drive, DRIVE_ROOT_FOLDER);
+    const filtered = allFiles.filter(f => f.name.includes(query));
+    res.json({ files: filtered.map(f => ({ id: f.id, name: f.name })) });
+  } catch (error) { res.status(500).json({ message: String(error) }); }
+});
+
+// Drive 파일을 계약에 수동 연결 (관리자용)
+app.post("/admin/link-document", async (req, res) => {
+  try {
+    const { contract_id, drive_file_id, file_name } = req.body ?? {};
+    if (!contract_id || !drive_file_id) return res.status(400).json({ error: "contract_id, drive_file_id required" });
+    await ensureAppSchema();
+    await pool.query(
+      "insert into contract_documents (contract_id, storage_path, original_file_name, original_name, file_type, reason, drive_file_id) values ($1,'', $2, $2, 'CONTRACT_PDF', 'Drive연동(수동)', $3)",
+      [contract_id, file_name || "", drive_file_id]
+    );
+    res.json({ ok: true, contract_id, drive_file_id, file_name });
+  } catch (error) { res.status(500).json({ message: String(error) }); }
 });
 
 exports.api = onRequest({ cors: true }, app);

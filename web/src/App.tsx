@@ -19,7 +19,8 @@ import {
   UserRound,
   Users,
   Wallet,
-  X
+  X,
+  ClipboardList
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type Dispatch, type SetStateAction } from "react";
 
@@ -56,7 +57,7 @@ type ContractRowData = {
   company?: string;
 };
 
-type MenuKey = "dashboard" | "contracts" | "appointment" | "referrers" | "allowances" | "salaries" | "account" | "changes" | "system" | "none";
+type MenuKey = "dashboard" | "contracts" | "appointment" | "referrers" | "allowances" | "salaries" | "account" | "changes" | "system" | "verification" | "audit" | "none";
 type ContractView = "list" | "create" | "detail";
 type DetailTab = "basic" | "document" | "change" | "history";
 type UserAccount = { id: number; email: string; role: "시스템관리자" | "운영자"; state: "활성" | "비활성"; password: string };
@@ -86,6 +87,8 @@ const menus: { key: MenuKey; label: string; icon: JSX.Element; indent?: boolean;
   { key: "none", label: "계약관리", isHeader: true, icon: <FileText size={18} /> },
   { key: "contracts", label: "점주점장계약", indent: true, icon: <UserRound size={18} /> },
   { key: "appointment", label: "임용계약", indent: true, icon: <Plus size={18} /> },
+  { key: "verification", label: "대사 및 등록", indent: true, icon: <CheckCircle2 size={18} /> },
+  { key: "audit", label: "계약서 대사", indent: true, icon: <ClipboardList size={18} /> },
   { key: "changes", label: "변경이력조회", indent: true, icon: <History size={18} /> },
   { key: "none", label: "지급관리", isHeader: true, icon: <Wallet size={18} /> },
   { key: "allowances", label: "수당지급", indent: true, icon: <CircleDollarSign size={18} /> },
@@ -3335,6 +3338,383 @@ function ChangePage({ rows: contractRows, authUser }: { rows: ContractRowData[];
   );
 }
 
+// ── 계약서 대사 페이지 ──────────────────────────────────────────────────────
+type AuditContract = {
+  id: number; contractor_name: string; status: string; contract_date: string;
+  first_allowance_date: string; deposit_amount: number | null; work_allowance: number | null;
+  referrer_name: string; affiliation: string; bank_name: string; account_no: string;
+  account_holder: string; phone: string; remarks: string;
+  verified_at: string | null; tags: string[] | null; meta_memo: string | null;
+  transferred_from_id: number | null; transferred_from_name: string | null;
+  doc_count: number;
+};
+type AuditDoc = { id: number; original_name: string; drive_file_id: string | null; storage_path: string; reason: string; page_range: string | null };
+
+function AuditPage() {
+  const [list, setList] = useState<AuditContract[]>([]);
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<AuditContract | null>(null);
+  const [docs, setDocs] = useState<AuditDoc[]>([]);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [selectedDocId, setSelectedDocId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [meta, setMeta] = useState({ verified: false, tags: "" as string, meta_memo: "", transferred_from_id: "" as string, page_range: "" });
+  const [transferSearch, setTransferSearch] = useState("");
+  const [transferResults, setTransferResults] = useState<{ id: number; contractor_name: string; contract_date: string }[]>([]);
+  const [linkSearch, setLinkSearch] = useState("");
+  const [linkResults, setLinkResults] = useState<{ id: string; name: string }[]>([]);
+  const [statusFilter, setStatusFilter] = useState<"전체" | "확인" | "미확인">("전체");
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`${API_BASE}/admin/audit-list`)
+      .then(r => r.json())
+      .then(d => setList(d.rows || []))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filtered = list.filter(c => {
+    const matchSearch = !search || c.contractor_name.includes(search) || (c.referrer_name || "").includes(search);
+    const matchStatus = statusFilter === "전체" || (statusFilter === "확인" ? !!c.verified_at : !c.verified_at);
+    return matchSearch && matchStatus;
+  });
+
+  const handleSelect = (c: AuditContract) => {
+    setSelected(c);
+    setPdfUrl(null);
+    setSelectedDocId(null);
+    setMeta({
+      verified: !!c.verified_at,
+      tags: (c.tags || []).join(", "),
+      meta_memo: c.meta_memo || "",
+      transferred_from_id: c.transferred_from_id ? String(c.transferred_from_id) : "",
+      page_range: "",
+    });
+    setTransferSearch(c.transferred_from_name || "");
+    setTransferResults([]);
+    setLinkSearch("");
+    setLinkResults([]);
+    fetch(`${API_BASE}/contracts/${c.id}/documents`)
+      .then(r => r.json())
+      .then(d => setDocs(d.rows || []));
+  };
+
+  const handleDocClick = (doc: AuditDoc) => {
+    setSelectedDocId(doc.id);
+    setMeta(m => ({ ...m, page_range: doc.page_range || "" }));
+    setPdfUrl(`${API_BASE}/contracts/${selected!.id}/documents/${doc.id}/pdf`);
+  };
+
+  const handleSaveMeta = async () => {
+    if (!selected) return;
+    setSaving(true);
+    const tagsArr = meta.tags.split(",").map(t => t.trim()).filter(Boolean);
+    await fetch(`${API_BASE}/contracts/${selected.id}/meta`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        verified: meta.verified,
+        tags: tagsArr,
+        meta_memo: meta.meta_memo,
+        transferred_from_id: meta.transferred_from_id ? Number(meta.transferred_from_id) : null,
+        doc_id: selectedDocId,
+        page_range: meta.page_range,
+      }),
+    });
+    setSaving(false);
+    // 목록 업데이트
+    setList(prev => prev.map(c => c.id === selected.id
+      ? { ...c, verified_at: meta.verified ? (c.verified_at || new Date().toISOString()) : null, tags: tagsArr, meta_memo: meta.meta_memo }
+      : c));
+    setSelected(s => s ? { ...s, verified_at: meta.verified ? (s.verified_at || new Date().toISOString()) : null } : s);
+    if (selectedDocId) {
+      setDocs(prev => prev.map(d => d.id === selectedDocId ? { ...d, page_range: meta.page_range || null } : d));
+    }
+  };
+
+  const handleTransferSearch = async () => {
+    if (!transferSearch.trim()) return;
+    const r = await fetch(`${API_BASE}/contracts?search=${encodeURIComponent(transferSearch)}&limit=10`);
+    const d = await r.json();
+    setTransferResults((d.rows || []).slice(0, 10).map((c: any) => ({ id: c.id, contractor_name: c.name, contract_date: c.contractDate })));
+  };
+
+  const handleLinkSearch = async () => {
+    if (!linkSearch.trim()) return;
+    const r = await fetch(`${API_BASE}/admin/drive-search`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: linkSearch }),
+    });
+    const d = await r.json();
+    setLinkResults((d.files || []).slice(0, 20));
+  };
+
+  const handleLinkFile = async (fileId: string, fileName: string) => {
+    if (!selected) return;
+    await fetch(`${API_BASE}/admin/link-document`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contract_id: selected.id, drive_file_id: fileId, file_name: fileName }),
+    });
+    const r = await fetch(`${API_BASE}/contracts/${selected.id}/documents`);
+    const d = await r.json();
+    setDocs(d.rows || []);
+    setList(prev => prev.map(c => c.id === selected.id ? { ...c, doc_count: (d.rows || []).length } : c));
+    setLinkSearch("");
+    setLinkResults([]);
+  };
+
+  const selectedIdx = filtered.findIndex(c => c.id === selected?.id);
+  const goPrev = () => { if (selectedIdx > 0) handleSelect(filtered[selectedIdx - 1]); };
+  const goNext = () => { if (selectedIdx < filtered.length - 1) handleSelect(filtered[selectedIdx + 1]); };
+
+  const fmt = (v: number | null) => v ? Number(v).toLocaleString("ko-KR") + " 원" : "-";
+
+  return (
+    <div style={{ display: "flex", height: "calc(100vh - 56px)", overflow: "hidden", fontFamily: "inherit" }}>
+      {/* ① 왼쪽: 계약 목록 */}
+      <div style={{ width: 220, borderRight: "1px solid #e2e8f0", display: "flex", flexDirection: "column", background: "#f8fafc" }}>
+        <div style={{ padding: "10px 8px 6px", borderBottom: "1px solid #e2e8f0" }}>
+          <input
+            value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="계약자명 검색" autoFocus
+            style={{ width: "100%", padding: "5px 8px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 12, boxSizing: "border-box" }}
+          />
+          <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
+            {(["전체", "미확인", "확인"] as const).map(f => (
+              <button key={f} onClick={() => setStatusFilter(f)}
+                style={{ flex: 1, fontSize: 11, padding: "3px 0", borderRadius: 4, border: "1px solid #cbd5e1",
+                  background: statusFilter === f ? "#3b82f6" : "#fff", color: statusFilter === f ? "#fff" : "#374151", cursor: "pointer" }}>
+                {f}
+              </button>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
+            {filtered.length}건 / 확인 {filtered.filter(c => c.verified_at).length}건
+          </div>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {loading && <div style={{ padding: 16, textAlign: "center", color: "#94a3b8", fontSize: 12 }}>불러오는 중...</div>}
+          {filtered.map((c, i) => (
+            <div key={c.id} onClick={() => handleSelect(c)}
+              style={{ padding: "7px 10px", cursor: "pointer", borderBottom: "1px solid #f1f5f9",
+                background: selected?.id === c.id ? "#eff6ff" : "transparent",
+                borderLeft: selected?.id === c.id ? "3px solid #3b82f6" : "3px solid transparent" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 12, fontWeight: selected?.id === c.id ? 600 : 400, color: "#1e293b" }}>
+                  {filtered.indexOf(c) + 1}. {c.contractor_name}
+                </span>
+                <span style={{ fontSize: 11 }}>
+                  {c.verified_at ? "✓" : c.doc_count > 0 ? "△" : "○"}
+                </span>
+              </div>
+              <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
+                {c.first_allowance_date || c.contract_date} · {c.status}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ padding: "8px", borderTop: "1px solid #e2e8f0", display: "flex", gap: 6 }}>
+          <button onClick={goPrev} disabled={selectedIdx <= 0}
+            style={{ flex: 1, padding: "5px 0", fontSize: 12, border: "1px solid #cbd5e1", borderRadius: 5, cursor: selectedIdx > 0 ? "pointer" : "default", background: "#fff", color: "#374151" }}>
+            ◀ 이전
+          </button>
+          <button onClick={goNext} disabled={selectedIdx >= filtered.length - 1}
+            style={{ flex: 1, padding: "5px 0", fontSize: 12, border: "1px solid #cbd5e1", borderRadius: 5, cursor: selectedIdx < filtered.length - 1 ? "pointer" : "default", background: "#fff", color: "#374151" }}>
+            다음 ▶
+          </button>
+        </div>
+      </div>
+
+      {/* ② 가운데: 계약 정보 + 메타 */}
+      <div style={{ width: 320, borderRight: "1px solid #e2e8f0", overflowY: "auto", padding: "12px 14px", background: "#fff", display: "flex", flexDirection: "column", gap: 12 }}>
+        {!selected ? (
+          <div style={{ color: "#94a3b8", fontSize: 13, marginTop: 40, textAlign: "center" }}>왼쪽 목록에서 계약을 선택하세요</div>
+        ) : (<>
+          {/* 계약 정보 */}
+          <section>
+            <div style={{ fontWeight: 700, fontSize: 14, color: "#1e293b", marginBottom: 8, borderBottom: "2px solid #3b82f6", paddingBottom: 4 }}>
+              계약 정보
+            </div>
+            <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+              <tbody>
+                {[
+                  ["계약자", selected.contractor_name],
+                  ["상태", selected.status],
+                  ["계약일", selected.contract_date],
+                  ["수당지급일", selected.first_allowance_date],
+                  ["보증금", fmt(selected.deposit_amount)],
+                  ["수익금", fmt(selected.work_allowance)],
+                  ["추천인", selected.referrer_name],
+                  ["소속", selected.affiliation],
+                  ["은행", selected.bank_name],
+                  ["계좌", selected.account_no],
+                  ["예금주", selected.account_holder],
+                  ["연락처", selected.phone],
+                ].map(([k, v]) => (
+                  <tr key={k} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                    <td style={{ padding: "4px 6px", color: "#64748b", width: 70, whiteSpace: "nowrap" }}>{k}</td>
+                    <td style={{ padding: "4px 6px", color: "#1e293b" }}>{v || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {selected.remarks && (
+              <div style={{ marginTop: 6, padding: "6px 8px", background: "#f8fafc", borderRadius: 6, fontSize: 11, color: "#475569" }}>
+                📝 {selected.remarks}
+              </div>
+            )}
+          </section>
+
+          {/* 연결 파일 */}
+          <section>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "#1e293b", marginBottom: 6, borderBottom: "1px solid #e2e8f0", paddingBottom: 3 }}>
+              연결 파일 ({docs.length}건)
+            </div>
+            {docs.length === 0 && <div style={{ fontSize: 12, color: "#f59e0b" }}>⚠ 연결된 파일 없음</div>}
+            {docs.map((d, i) => (
+              <div key={d.id} onClick={() => handleDocClick(d)}
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", marginBottom: 4,
+                  border: `1px solid ${selectedDocId === d.id ? "#3b82f6" : "#e2e8f0"}`,
+                  borderRadius: 6, cursor: "pointer", background: selectedDocId === d.id ? "#eff6ff" : "#f8fafc" }}>
+                <span style={{ fontSize: 11, color: "#64748b", minWidth: 16 }}>{i + 1}</span>
+                <span style={{ fontSize: 11, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.original_name}</span>
+                {d.page_range && <span style={{ fontSize: 10, color: "#7c3aed", background: "#ede9fe", padding: "1px 4px", borderRadius: 3 }}>p.{d.page_range}</span>}
+              </div>
+            ))}
+
+            {/* Drive 파일 추가 연결 */}
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4 }}>Drive 파일 검색 후 연결</div>
+              <div style={{ display: "flex", gap: 4 }}>
+                <input value={linkSearch} onChange={e => setLinkSearch(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleLinkSearch()}
+                  placeholder="파일명 키워드"
+                  style={{ flex: 1, padding: "4px 6px", border: "1px solid #cbd5e1", borderRadius: 5, fontSize: 11 }} />
+                <button onClick={handleLinkSearch}
+                  style={{ padding: "4px 8px", background: "#3b82f6", color: "#fff", border: "none", borderRadius: 5, fontSize: 11, cursor: "pointer" }}>
+                  검색
+                </button>
+              </div>
+              {linkResults.map(f => (
+                <div key={f.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                  padding: "4px 6px", marginTop: 3, background: "#f8fafc", borderRadius: 5, fontSize: 11, border: "1px solid #e2e8f0" }}>
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#374151" }}>{f.name}</span>
+                  <button onClick={() => handleLinkFile(f.id, f.name)}
+                    style={{ marginLeft: 6, padding: "2px 6px", background: "#10b981", color: "#fff", border: "none", borderRadius: 4, fontSize: 10, cursor: "pointer" }}>
+                    연결
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* 양도자 연결 */}
+          <section>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "#1e293b", marginBottom: 6, borderBottom: "1px solid #e2e8f0", paddingBottom: 3 }}>
+              양도자 연결
+            </div>
+            {selected.transferred_from_name && (
+              <div style={{ fontSize: 12, color: "#7c3aed", marginBottom: 6 }}>
+                현재: {selected.transferred_from_name} (ID:{selected.transferred_from_id})
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 4 }}>
+              <input value={transferSearch} onChange={e => setTransferSearch(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleTransferSearch()}
+                placeholder="양도자 이름 검색"
+                style={{ flex: 1, padding: "4px 6px", border: "1px solid #cbd5e1", borderRadius: 5, fontSize: 11 }} />
+              <button onClick={handleTransferSearch}
+                style={{ padding: "4px 8px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 5, fontSize: 11, cursor: "pointer" }}>
+                검색
+              </button>
+            </div>
+            {transferResults.map(c => (
+              <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                padding: "4px 6px", marginTop: 3, background: "#f8fafc", borderRadius: 5, fontSize: 11, border: "1px solid #e2e8f0" }}>
+                <span>{c.contractor_name} ({c.contract_date})</span>
+                <button onClick={() => { setMeta(m => ({ ...m, transferred_from_id: String(c.id) })); setTransferResults([]); setTransferSearch(c.contractor_name); }}
+                  style={{ padding: "2px 6px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 4, fontSize: 10, cursor: "pointer" }}>
+                  선택
+                </button>
+              </div>
+            ))}
+          </section>
+
+          {/* 메타 정보 */}
+          <section>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "#1e293b", marginBottom: 6, borderBottom: "1px solid #e2e8f0", paddingBottom: 3 }}>
+              메타 정보
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                <input type="checkbox" checked={meta.verified} onChange={e => setMeta(m => ({ ...m, verified: e.target.checked }))} />
+                <span style={{ color: meta.verified ? "#10b981" : "#64748b", fontWeight: meta.verified ? 600 : 400 }}>
+                  {meta.verified ? "✓ 확인 완료" : "확인 전"}
+                </span>
+              </label>
+              <div>
+                <div style={{ fontSize: 11, color: "#64748b", marginBottom: 3 }}>합본 페이지 (파일 선택 후 입력)</div>
+                <input value={meta.page_range} onChange={e => setMeta(m => ({ ...m, page_range: e.target.value }))}
+                  placeholder="예: 21-23"
+                  style={{ width: "100%", padding: "4px 6px", border: "1px solid #cbd5e1", borderRadius: 5, fontSize: 12, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: "#64748b", marginBottom: 3 }}>태그 (쉼표 구분)</div>
+                <input value={meta.tags} onChange={e => setMeta(m => ({ ...m, tags: e.target.value }))}
+                  placeholder="예: 증액, 합본, 특이사항"
+                  style={{ width: "100%", padding: "4px 6px", border: "1px solid #cbd5e1", borderRadius: 5, fontSize: 12, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: "#64748b", marginBottom: 3 }}>메모</div>
+                <textarea value={meta.meta_memo} onChange={e => setMeta(m => ({ ...m, meta_memo: e.target.value }))}
+                  placeholder="자유 메모 입력"
+                  rows={3}
+                  style={{ width: "100%", padding: "4px 6px", border: "1px solid #cbd5e1", borderRadius: 5, fontSize: 12, boxSizing: "border-box", resize: "vertical" }} />
+              </div>
+              <button onClick={handleSaveMeta} disabled={saving}
+                style={{ padding: "7px 0", background: saving ? "#94a3b8" : "#3b82f6", color: "#fff", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: saving ? "default" : "pointer" }}>
+                {saving ? "저장 중..." : "저장"}
+              </button>
+            </div>
+          </section>
+        </>)}
+      </div>
+
+      {/* ③ 오른쪽: PDF 뷰어 */}
+      <div style={{ flex: 1, background: "#1e293b", display: "flex", flexDirection: "column" }}>
+        {!pdfUrl ? (
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ textAlign: "center", color: "#64748b", lineHeight: 2.2, fontSize: 13 }}>
+              {!selected ? (
+                <>
+                  <div style={{ fontSize: 28, marginBottom: 8 }}>📋</div>
+                  <div style={{ color: "#94a3b8" }}>① 왼쪽 목록에서 계약자를 클릭하세요</div>
+                </>
+              ) : docs.length === 0 ? (
+                <>
+                  <div style={{ fontSize: 28, marginBottom: 8 }}>⚠️</div>
+                  <div style={{ color: "#f59e0b" }}>{selected.contractor_name} — 연결된 파일 없음</div>
+                  <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 4 }}>가운데 패널 "Drive 파일 검색"으로 파일을 연결하세요</div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 28, marginBottom: 8 }}>📄</div>
+                  <div style={{ color: "#cbd5e1" }}>② 가운데 패널 "연결 파일" 목록에서</div>
+                  <div style={{ color: "#3b82f6", fontWeight: 600 }}>파일 박스를 클릭하면 PDF가 표시됩니다</div>
+                </>
+              )}
+            </div>
+          </div>
+        ) : (
+          <iframe src={pdfUrl} style={{ flex: 1, width: "100%", height: "100%", border: "none" }} title="PDF 뷰어" />
+        )}
+      </div>
+    </div>
+  );
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function SystemPage({
   users,
   setUsers,
@@ -3347,6 +3727,39 @@ function SystemPage({
   onResetPassword: (id: number) => void;
 }) {
   const [newUser, setNewUser] = useState({ email: "", role: "운영자" });
+
+  // 엑셀 일괄 등록
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ inserted: number; skipped: number; driveMatched: number; skippedList?: any[] } | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImportExcel = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(",")[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const res = await fetch(`${API_BASE}/admin/import-excel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: base64 }),
+      });
+      const data = await res.json();
+      if (res.ok) setImportResult(data);
+      else alert(`오류: ${data.message}`);
+    } catch {
+      alert("서버 통신 오류가 발생했습니다.");
+    } finally {
+      setImporting(false);
+      if (importInputRef.current) importInputRef.current.value = "";
+    }
+  };
 
   // 계약서 관리
   const [contractTypes, setContractTypes] = useState<ContractTypeRow[]>([]);
@@ -3575,6 +3988,33 @@ function SystemPage({
           </section>
         </div>
       )}
+
+      {/* 엑셀 일괄 등록 */}
+      <section className="system-section">
+        <div className="ct-manage-header">
+          <div className="card-title-sm">데이터 가져오기 (엑셀)</div>
+        </div>
+        <p style={{ fontSize: 13, color: "#5e6a83", margin: "0 0 12px" }}>
+          계약현황 엑셀 파일에서 <strong>LAS매장점주</strong> 행을 일괄 등록하고, 구글 드라이브 PDF를 자동 연결합니다.<br />
+          중복된 계약(동일 계약자명 + 계약일)은 건너뜁니다.
+        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <input ref={importInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={handleImportExcel} />
+          <button className="primary-btn" disabled={importing} onClick={() => importInputRef.current?.click()}>
+            {importing ? "처리 중..." : "엑셀 파일 선택"}
+          </button>
+          {importResult && (
+            <span style={{ fontSize: 13, color: "#374151" }}>
+              신규 등록 <strong>{importResult.inserted}건</strong> · Drive 연결 <strong>{importResult.driveMatched}건</strong> · 중복 스킵 <strong>{importResult.skipped}건</strong>
+            </span>
+          )}
+        </div>
+        {importResult && importResult.skippedList && importResult.skippedList.filter(s => s.reason !== "중복").length > 0 && (
+          <div style={{ marginTop: 10, fontSize: 12, color: "#dc2626" }}>
+            등록 실패: {importResult.skippedList.filter(s => s.reason !== "중복").map(s => `${s.name}(${s.reason})`).join(", ")}
+          </div>
+        )}
+      </section>
     </div>
   );
 }
@@ -3960,6 +4400,193 @@ function ContractDetail({ row, onBack, authUser, onUpdate }: { row: ContractRowD
   </div>;
 }
 
+function VerificationPage({ onLoadContracts }: { onLoadContracts: () => void }) {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [results, setResults] = useState<any[]>([]);
+  const [selectedStaging, setSelectedStaging] = useState<any | null>(null);
+  const [driveFiles, setDriveFiles] = useState<any[]>([]);
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/drive/files")
+      .then(res => res.json())
+      .then(data => setDriveFiles(data.rows || []))
+      .catch(() => {});
+  }, []);
+
+  const handleImport = async () => {
+    if (!confirm("엑셀 데이터를 스테이징 테이블로 불러오시겠습니까?")) return;
+    setLoading(true);
+    try {
+      const res = await fetch("/api/staging/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filePath: "c:/ProjectCode/contractmanager/data/계약현황_작업파일_20260515.xlsx" })
+      });
+      const data = await res.json();
+      if (res.ok) alert(`${data.count}건의 데이터를 성공적으로 불러왔습니다.`);
+      else alert(`실패: ${data.message}`);
+    } catch (e) {
+      alert("오류가 발생했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleClearDB = async () => {
+    if (!confirm("주의: 모든 계약 정보를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")) return;
+    if (!confirm("정말로 삭제하시겠습니까?")) return;
+    try {
+      const res = await fetch("/api/contracts/all", { method: "DELETE" });
+      if (res.ok) {
+        alert("모든 계약 정보가 삭제되었습니다.");
+        onLoadContracts();
+      }
+    } catch (e) {
+      alert("삭제 중 오류가 발생했습니다.");
+    }
+  };
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchTerm.trim()) return;
+    try {
+      const res = await fetch(`/api/staging/search?name=${encodeURIComponent(searchTerm)}`);
+      const data = await res.json();
+      setResults(data.rows || []);
+      if (data.rows.length === 0) alert("검색 결과가 없습니다.");
+    } catch (e) {}
+  };
+
+  const selectStaging = (row: any) => {
+    setSelectedStaging(row);
+    // Find matching PDF by name
+    const payload = row.raw_payload;
+    const name = payload.name;
+    const matches = driveFiles.filter(f => f.name.includes(name));
+    if (matches.length > 0) setSelectedFileId(matches[0].id);
+    else setSelectedFileId(null);
+  };
+
+  const handleRegister = async () => {
+    if (!selectedStaging) return;
+    const p = selectedStaging.raw_payload;
+    const body = {
+      contractNo: p.no,
+      name: p.name,
+      type: p.type,
+      ref: p.ref,
+      contractDate: p.contractDate,
+      payoutDate: p.payoutDate,
+      endDate: p.endDate,
+      depositAmountValue: p.deposit,
+      allowanceAmountValue: p.allowance,
+      bankName: p.bankName,
+      accountNo: p.accountNo,
+      accountHolder: p.accountHolder,
+      residentRegistrationNumber: p.rrn,
+      phone: p.phone,
+      isAppointment: (p.type || "").includes("임용"),
+      affiliation: p.affiliation,
+      remarks: p.remarks
+    };
+
+    try {
+      const res = await fetch("/api/contracts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      if (res.ok) {
+        alert(`${p.name}님의 계약이 등록되었습니다.`);
+        onLoadContracts();
+        // Optionally mark as verified in staging
+      } else {
+        const data = await res.json();
+        alert(`실패: ${data.message}`);
+      }
+    } catch (e) {
+      alert("오류 발생");
+    }
+  };
+
+  return (
+    <div className="verification-page">
+      <div className="head-with-btn">
+        <PageHeader title="대사 및 등록" desc="엑셀 데이터와 PDF를 대조하여 계약을 등록합니다." />
+        <div className="actions">
+          <button className="line-btn danger-btn-outline" onClick={handleClearDB}>DB 전체 삭제</button>
+          <button className="primary-btn" onClick={handleImport} disabled={loading}>{loading ? "가져오는 중..." : "엑셀 데이터 불러오기"}</button>
+        </div>
+      </div>
+
+      <div className="verify-layout">
+        <div className="verify-left">
+          <section className="card" style={{ marginBottom: 0 }}>
+            <form onSubmit={handleSearch} className="search-box">
+              <Search size={18} />
+              <input className="input-input" placeholder="계약자 이름 검색..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+              <button type="submit" hidden />
+            </form>
+          </section>
+
+          <div className="verify-search-results">
+            {results.map(r => (
+              <div key={r.id} className={`verify-item-card ${selectedStaging?.id === r.id ? "active" : ""}`} onClick={() => selectStaging(r)}>
+                <div className="verify-item-name">
+                  <span>{r.contractor_name}</span>
+                  <span className="badge">{r.contract_name}</span>
+                </div>
+                <div className="verify-item-meta">
+                  {r.first_allowance_date} | {r.contract_no || "번호없음"}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {selectedStaging && (
+            <section className="card" style={{ marginTop: "auto" }}>
+              <div className="card-title-sm">계약 정보 확인</div>
+              <div style={{ fontSize: "13px", display: "grid", gap: "8px" }}>
+                <div className="kv"><b>계약번호</b><span>{selectedStaging.raw_payload.no}</span></div>
+                <div className="kv"><b>보증금</b><span>{Number(selectedStaging.raw_payload.deposit).toLocaleString()}원</span></div>
+                <div className="kv"><b>활동비</b><span>{Number(selectedStaging.raw_payload.allowance).toLocaleString()}원</span></div>
+                <div className="kv"><b>은행/계좌</b><span>{selectedStaging.raw_payload.bankName} {selectedStaging.raw_payload.accountNo}</span></div>
+                <div className="kv"><b>주민번호</b><span>{selectedStaging.raw_payload.rrn}</span></div>
+                <div className="kv"><b>비고</b><span style={{ fontSize: "11px", color: "#666" }}>{selectedStaging.raw_payload.remarks}</span></div>
+              </div>
+              <div className="actions" style={{ marginTop: "16px" }}>
+                <button className="primary-btn" style={{ width: "100%" }} onClick={handleRegister}>검증 완료 및 시스템 등록</button>
+              </div>
+            </section>
+          )}
+        </div>
+
+        <div className="verify-right">
+          {selectedFileId ? (
+            <>
+              <div className="verify-pdf-selector">
+                <FileText size={16} />
+                {driveFiles.filter(f => f.name.includes(selectedStaging?.contractor_name)).map(f => (
+                  <button key={f.id} className={`verify-pdf-chip ${selectedFileId === f.id ? "active" : ""}`} onClick={() => setSelectedFileId(f.id)}>
+                    {f.name}
+                  </button>
+                ))}
+              </div>
+              <iframe className="verify-pdf-frame" src={`/api/drive/stream/${selectedFileId}`} title="PDF Viewer" />
+            </>
+          ) : (
+            <div className="pdf-empty-box" style={{ height: "100%" }}>
+              {selectedStaging ? "매칭되는 PDF 파일을 찾을 수 없습니다." : "계약자를 선택하면 해당 PDF가 여기에 표시됩니다."}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   useEffect(() => {
     const applyKoLang = () => {
@@ -4053,6 +4680,8 @@ export function App() {
           if (menu === "salaries") return <SalaryPage rows={contracts.filter(c => c.isAppointment || (c.type || "").includes("임용"))} />;
           if (menu === "account") return <AccountPage rows={contracts} />;
           if (menu === "changes") return <ChangeHistoryPage />;
+          if (menu === "verification") return <VerificationPage onLoadContracts={loadContracts} />;
+          if (menu === "audit") return <AuditPage />;
           if (menu === "system") return <SystemPage users={users} setUsers={setUsers} onAddUserWithTempPassword={addUserWithTempPassword} onResetPassword={resetPassword} authUser={authUser} />;
           return <DashboardPage rows={contracts} onDetail={(r) => { setSelectedContract(r); setContractView("detail"); setMenu("contracts"); }} />;
         })()}
