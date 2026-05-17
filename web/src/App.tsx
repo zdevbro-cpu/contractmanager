@@ -3341,14 +3341,33 @@ function ChangePage({ rows: contractRows, authUser }: { rows: ContractRowData[];
 // ── 계약서 대사 페이지 ──────────────────────────────────────────────────────
 type AuditContract = {
   id: number; contractor_name: string; status: string; contract_date: string;
-  first_allowance_date: string; deposit_amount: number | null; work_allowance: number | null;
+  first_allowance_date: string; contract_end_date: string | null;
+  deposit_amount: number | null; work_allowance: number | null;
   referrer_name: string; affiliation: string; bank_name: string; account_no: string;
   account_holder: string; phone: string; remarks: string;
+  resident_registration_number: string | null;
   verified_at: string | null; tags: string[] | null; meta_memo: string | null;
   transferred_from_id: number | null; transferred_from_name: string | null;
   doc_count: number;
+  correction_count?: number; last_correction_at?: string | null;
 };
 type AuditDoc = { id: number; original_name: string; drive_file_id: string | null; storage_path: string; reason: string; page_range: string | null };
+type CorrectionRow = { id: number; field_name: string; old_value: string; new_value: string; corrected_at: string; corrected_by: string | null };
+
+const CORRECTION_FIELD_LABELS: Record<string, string> = {
+  status: "상태",
+  contract_date: "계약일",
+  first_allowance_date: "수당지급일",
+  contract_end_date: "계약종료일",
+  deposit_amount: "보증금",
+  work_allowance: "수익금",
+  bank_name: "은행",
+  account_no: "계좌",
+  account_holder: "예금주",
+  phone: "연락처",
+  resident_registration_number: "주민번호",
+};
+const STATUS_OPTIONS = ["정상운영", "양수", "양도", "증액", "감액", "폐기"];
 
 function AuditPage() {
   const [list, setList] = useState<AuditContract[]>([]);
@@ -3364,8 +3383,13 @@ function AuditPage() {
   const [transferResults, setTransferResults] = useState<{ id: number; contractor_name: string; contract_date: string }[]>([]);
   const [linkSearch, setLinkSearch] = useState("");
   const [linkResults, setLinkResults] = useState<{ id: string; name: string }[]>([]);
-  const [viewMode, setViewMode] = useState<"확정" | "남은 계약정보">("남은 계약정보");
+  const [viewMode, setViewMode] = useState<"전체" | "확정" | "남은 계약정보">("남은 계약정보");
   const [specialFilter, setSpecialFilter] = useState<"전체" | "양수" | "합본" | "폐기">("전체");
+  const [searchTarget, setSearchTarget] = useState<"전체" | "계약자" | "추천인">("전체");
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [savingCorrection, setSavingCorrection] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [history, setHistory] = useState<CorrectionRow[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
   const pendingEnterRef = useRef(false);
 
@@ -3378,8 +3402,17 @@ function AuditPage() {
   }, []);
 
   const filtered = list.filter(c => {
-    const matchSearch = !search || c.contractor_name.includes(search) || (c.referrer_name || "").includes(search);
-    const matchView = viewMode === "확정" ? !!c.verified_at : !c.verified_at;
+    const matchSearch = (() => {
+      if (searchTarget === "추천인") {
+        if (!search) return !!c.referrer_name;
+        return (c.referrer_name || "").includes(search);
+      }
+      if (searchTarget === "계약자") {
+        return !search || c.contractor_name.includes(search);
+      }
+      return !search || c.contractor_name.includes(search) || (c.referrer_name || "").includes(search);
+    })();
+    const matchView = viewMode === "전체" ? true : viewMode === "확정" ? !!c.verified_at : !c.verified_at;
     const matchSpecial = specialFilter === "전체" ||
       (specialFilter === "양수" ? c.status === "양수" :
        specialFilter === "폐기" ? c.status === "폐기" :
@@ -3402,6 +3435,9 @@ function AuditPage() {
     setTransferResults([]);
     setLinkSearch("");
     setLinkResults([]);
+    setEdits({});
+    setShowHistory(false);
+    setHistory([]);
     fetch(`${API_BASE}/contracts/${c.id}/documents`)
       .then(r => r.json())
       .then(d => {
@@ -3422,31 +3458,72 @@ function AuditPage() {
     setPdfUrl(`${API_BASE}/contracts/${selected!.id}/documents/${doc.id}/pdf`);
   };
 
-  const handleSaveMeta = async () => {
+  const handleSave = async () => {
     if (!selected) return;
     setSaving(true);
-    const tagsArr = meta.tags.split(",").map(t => t.trim()).filter(Boolean);
-    await fetch(`${API_BASE}/contracts/${selected.id}/meta`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        verified: meta.verified,
-        tags: tagsArr,
-        meta_memo: meta.meta_memo,
-        transferred_from_id: meta.transferred_from_id ? Number(meta.transferred_from_id) : null,
-        doc_id: selectedDocId,
-        page_range: meta.page_range,
-      }),
-    });
-    setSaving(false);
-    // 목록 업데이트
-    setList(prev => prev.map(c => c.id === selected.id
-      ? { ...c, verified_at: meta.verified ? (c.verified_at || new Date().toISOString()) : null, tags: tagsArr, meta_memo: meta.meta_memo }
-      : c));
-    setSelected(s => s ? { ...s, verified_at: meta.verified ? (s.verified_at || new Date().toISOString()) : null } : s);
-    if (selectedDocId) {
-      setDocs(prev => prev.map(d => d.id === selectedDocId ? { ...d, page_range: meta.page_range || null } : d));
+    try {
+      // 1. 변경된 필드가 있으면 correction 호출
+      const changes: Record<string, string | null> = {};
+      for (const f of Object.keys(CORRECTION_FIELD_LABELS)) {
+        if (Object.prototype.hasOwnProperty.call(edits, f)) {
+          changes[f] = edits[f] === "" ? null : edits[f];
+        }
+      }
+      if (Object.keys(changes).length > 0) {
+        const r = await fetch(`${API_BASE}/contracts/${selected.id}/correction`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ changes }),
+        });
+        const j = await r.json();
+        if (!j.ok) { alert("정정 저장 실패: " + (j.message || "")); return; }
+      }
+      // 2. 메타 저장 (항상 확정 처리)
+      const tagsArr = meta.tags.split(",").map(t => t.trim()).filter(Boolean);
+      const metaRes = await fetch(`${API_BASE}/contracts/${selected.id}/meta`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          verified: true,
+          tags: tagsArr,
+          meta_memo: meta.meta_memo,
+          transferred_from_id: meta.transferred_from_id ? Number(meta.transferred_from_id) : null,
+          doc_id: selectedDocId,
+          page_range: meta.page_range,
+        }),
+      });
+      if (!metaRes.ok) { alert(`메타 저장 실패: ${metaRes.status}`); return; }
+      // 3. 목록 재조회
+      const listRes = await fetch(`${API_BASE}/admin/audit-list`);
+      const listJson = await listRes.json();
+      const newList: AuditContract[] = listJson.rows || [];
+      setList(newList);
+      const updatedSelected = newList.find(c => c.id === selected.id) || null;
+      if (updatedSelected) {
+        setSelected(updatedSelected);
+        setMeta(m => ({ ...m, verified: !!updatedSelected.verified_at }));
+      }
+      if (selectedDocId) {
+        setDocs(prev => prev.map(d => d.id === selectedDocId ? { ...d, page_range: meta.page_range || null } : d));
+      }
+      setEdits({});
+      if (showHistory) loadHistory();
+    } catch (e) {
+      alert(`저장 오류: ${String(e)}`);
+    } finally {
+      setSaving(false);
     }
+  };
+
+  const loadHistory = async () => {
+    if (!selected) return;
+    const r = await fetch(`${API_BASE}/contracts/${selected.id}/corrections`);
+    const j = await r.json();
+    setHistory(j.rows || []);
+  };
+
+  const toggleHistory = async () => {
+    const next = !showHistory;
+    setShowHistory(next);
+    if (next) await loadHistory();
   };
 
   const handleTransferSearch = async () => {
@@ -3513,13 +3590,22 @@ function AuditPage() {
   const fmt = (v: number | null) => v ? Number(v).toLocaleString("ko-KR") + " 원" : "-";
 
   return (
-    <div style={{ display: "flex", height: "calc(100vh - 56px)", overflow: "hidden", fontFamily: "inherit" }}>
+    <div style={{ display: "flex", height: "calc(100vh - 176px)", overflow: "hidden", fontFamily: "inherit" }}>
       {/* ① 왼쪽: 계약 목록 */}
       <div style={{ width: 220, borderRight: "1px solid #e2e8f0", display: "flex", flexDirection: "column", background: "#f8fafc" }}>
         <div style={{ padding: "10px 8px 6px", borderBottom: "1px solid #e2e8f0" }}>
+          <div style={{ display: "flex", gap: 3, marginBottom: 4 }}>
+            {(["전체", "계약자", "추천인"] as const).map(t => (
+              <button key={t} onClick={() => setSearchTarget(t)}
+                style={{ flex: 1, fontSize: 10, padding: "3px 0", borderRadius: 4, border: "1px solid #cbd5e1",
+                  background: searchTarget === t ? "#0ea5e9" : "#fff", color: searchTarget === t ? "#fff" : "#374151", cursor: "pointer" }}>
+                {t}
+              </button>
+            ))}
+          </div>
           <input
             value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="계약자명 검색" autoFocus
+            placeholder={searchTarget === "추천인" ? "추천인명 검색" : searchTarget === "계약자" ? "계약자명 검색" : "계약자/추천인 검색"} autoFocus
             style={{ width: "100%", padding: "5px 8px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 12, boxSizing: "border-box" }}
           />
           <div style={{ display: "flex", gap: 3, marginTop: 6 }}>
@@ -3532,7 +3618,7 @@ function AuditPage() {
             ))}
           </div>
           <div style={{ display: "flex", gap: 3, marginTop: 4 }}>
-            {(["남은 계약정보", "확정"] as const).map(v => (
+            {(["전체", "남은 계약정보", "확정"] as const).map(v => (
               <button key={v} onClick={() => setViewMode(v)}
                 style={{ flex: 1, fontSize: 10, padding: "3px 0", borderRadius: 4, border: "1px solid #cbd5e1",
                   background: viewMode === v ? "#3b82f6" : "#fff", color: viewMode === v ? "#fff" : "#374151", cursor: "pointer" }}>
@@ -3555,9 +3641,11 @@ function AuditPage() {
                 <span style={{ fontSize: 12, fontWeight: selected?.id === c.id ? 600 : 400, color: "#1e293b" }}>
                   {filtered.indexOf(c) + 1}. {c.contractor_name}
                 </span>
-                <span style={{ fontSize: 11 }}>
-                  {c.verified_at ? "✓" : c.doc_count > 0 ? "△" : "○"}
-                </span>
+                {c.verified_at ? (
+                  <span style={{ fontSize: 16, fontWeight: 900, color: "#16a34a", lineHeight: 1 }}>✓</span>
+                ) : (
+                  <span style={{ fontSize: 11, color: "#94a3b8" }}>{c.doc_count > 0 ? "○" : "△"}</span>
+                )}
               </div>
               <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
                 {c.first_allowance_date || c.contract_date} · {c.status}
@@ -3584,32 +3672,125 @@ function AuditPage() {
         ) : (<>
           {/* 계약 정보 */}
           <section>
-            <div style={{ fontWeight: 700, fontSize: 14, color: "#1e293b", marginBottom: 8, borderBottom: "2px solid #3b82f6", paddingBottom: 4 }}>
-              계약 정보
+            <div style={{ fontWeight: 700, fontSize: 14, color: "#1e293b", marginBottom: 8, borderBottom: "2px solid #3b82f6", paddingBottom: 4, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>계약 정보 {selected.correction_count ? <span style={{ fontSize: 10, color: "#7c3aed", fontWeight: 500 }}>({selected.correction_count}회 정정)</span> : null}</span>
+              <button onClick={toggleHistory} style={{ fontSize: 10, padding: "2px 6px", background: showHistory ? "#7c3aed" : "#fff", color: showHistory ? "#fff" : "#7c3aed", border: "1px solid #7c3aed", borderRadius: 4, cursor: "pointer" }}>
+                {showHistory ? "이력 닫기" : "정정 이력"}
+              </button>
             </div>
-            <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
-              <tbody>
-                {[
-                  ["계약자", selected.contractor_name],
-                  ["상태", selected.status],
-                  ["계약일", selected.contract_date],
-                  ["수당지급일", selected.first_allowance_date],
-                  ["보증금", fmt(selected.deposit_amount)],
-                  ["수익금", fmt(selected.work_allowance)],
-                  ["추천인", selected.referrer_name],
-                  ["소속", selected.affiliation],
-                  ["은행", selected.bank_name],
-                  ["계좌", selected.account_no],
-                  ["예금주", selected.account_holder],
-                  ["연락처", selected.phone],
-                ].map(([k, v]) => (
-                  <tr key={k} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                    <td style={{ padding: "4px 6px", color: "#64748b", width: 70, whiteSpace: "nowrap" }}>{k}</td>
-                    <td style={{ padding: "4px 6px", color: "#1e293b" }}>{v || "-"}</td>
-                  </tr>
+            {(() => {
+              const formatDateInput = (raw: string) => {
+                const digits = raw.replace(/[^0-9]/g, "").slice(0, 8);
+                if (digits.length <= 4) return digits;
+                if (digits.length <= 6) return digits.slice(0, 4) + "-" + digits.slice(4);
+                return digits.slice(0, 4) + "-" + digits.slice(4, 6) + "-" + digits.slice(6);
+              };
+              const editableField = (field: string, type: "date" | "text" | "number") => {
+                const cur = edits[field];
+                const orig = (selected as any)[field];
+                const isMoney = field === "deposit_amount" || field === "work_allowance";
+                const isDate = type === "date";
+                const origStr = orig == null ? "" : String(orig);
+                const rawCur = cur !== undefined ? cur : origStr;
+                const dirty = cur !== undefined && rawCur !== origStr;
+                const dispVal = isMoney
+                  ? (rawCur === "" ? "" : Number(rawCur.replace(/,/g, "")).toLocaleString("ko-KR"))
+                  : rawCur;
+                return (
+                  <input
+                    type={isMoney || isDate ? "text" : (type === "number" ? "number" : "text")}
+                    value={dispVal}
+                    placeholder={isDate ? "YYYY-MM-DD" : undefined}
+                    maxLength={isDate ? 10 : undefined}
+                    onChange={(e) => {
+                      let v = e.target.value;
+                      if (isMoney) v = v.replace(/[^0-9]/g, "");
+                      else if (isDate) v = formatDateInput(v);
+                      setEdits((p) => ({ ...p, [field]: v }));
+                    }}
+                    onFocus={(e) => { try { e.currentTarget.select(); } catch {} }}
+                    style={{
+                      width: "100%", padding: "2px 4px", fontSize: 12,
+                      border: `1px solid ${dirty ? "#f59e0b" : "#e2e8f0"}`,
+                      background: dirty ? "#fef3c7" : "#fff", borderRadius: 3, boxSizing: "border-box",
+                      textAlign: isMoney ? "right" : "left",
+                    }}
+                  />
+                );
+              };
+              const statusField = () => {
+                const cur = edits.status;
+                const orig = selected.status || "";
+                const dispVal = cur !== undefined ? cur : orig;
+                const dirty = cur !== undefined && cur !== orig;
+                return (
+                  <select
+                    value={dispVal}
+                    onChange={(e) => setEdits((p) => ({ ...p, status: e.target.value }))}
+                    style={{
+                      width: "100%", padding: "2px 4px", fontSize: 12,
+                      border: `1px solid ${dirty ? "#f59e0b" : "#e2e8f0"}`,
+                      background: dirty ? "#fef3c7" : "#fff", borderRadius: 3, boxSizing: "border-box",
+                    }}
+                  >
+                    {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                );
+              };
+              const rows: Array<[string, React.ReactNode]> = [
+                ["계약자", <span style={{ color: "#1e293b" }}>{selected.contractor_name || "-"} 🔒</span>],
+                ["상태", statusField()],
+                ["계약일", editableField("contract_date", "date")],
+                ["수당지급일", editableField("first_allowance_date", "date")],
+                ["계약종료일", editableField("contract_end_date", "date")],
+                ["보증금(원)", editableField("deposit_amount", "number")],
+                ["수당(원)", editableField("work_allowance", "number")],
+                ["추천인", <span style={{ color: "#1e293b" }}>{selected.referrer_name || "-"} 🔒</span>],
+                ["소속", <span style={{ color: "#1e293b" }}>{selected.affiliation || "-"} 🔒</span>],
+                ["은행", editableField("bank_name", "text")],
+                ["계좌", editableField("account_no", "text")],
+                ["예금주", editableField("account_holder", "text")],
+                ["연락처", editableField("phone", "text")],
+                ["주민번호", editableField("resident_registration_number", "text")],
+              ];
+              return (
+                <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                  <tbody>
+                    {rows.map(([k, node]) => (
+                      <tr key={k} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                        <td style={{ padding: "3px 6px", color: "#64748b", width: 72, whiteSpace: "nowrap" }}>{k}</td>
+                        <td style={{ padding: "3px 6px", color: "#1e293b" }}>{node}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              );
+            })()}
+            {Object.keys(edits).length > 0 && (
+              <div style={{ marginTop: 6, display: "flex", justifyContent: "flex-end" }}>
+                <button onClick={() => setEdits({})}
+                  style={{ padding: "3px 10px", background: "#fff", color: "#64748b", border: "1px solid #cbd5e1", borderRadius: 5, fontSize: 11, cursor: "pointer" }}>
+                  변경 취소 ({Object.keys(edits).length}건)
+                </button>
+              </div>
+            )}
+            {showHistory && (
+              <div style={{ marginTop: 8, padding: 8, background: "#faf5ff", border: "1px solid #e9d5ff", borderRadius: 6, maxHeight: 200, overflowY: "auto" }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "#7c3aed", marginBottom: 4 }}>정정 이력 ({history.length}건)</div>
+                {history.length === 0 ? (
+                  <div style={{ fontSize: 11, color: "#94a3b8" }}>정정 이력 없음</div>
+                ) : history.map((h) => (
+                  <div key={h.id} style={{ fontSize: 11, padding: "4px 0", borderBottom: "1px solid #ede9fe" }}>
+                    <div style={{ color: "#64748b" }}>{h.corrected_at}{h.corrected_by ? ` · ${h.corrected_by}` : ""}</div>
+                    <div style={{ color: "#1e293b" }}>
+                      <span style={{ fontWeight: 600 }}>{CORRECTION_FIELD_LABELS[h.field_name] || h.field_name}</span>:{" "}
+                      <span style={{ color: "#ef4444", textDecoration: "line-through" }}>{h.old_value || "(빈)"}</span> →{" "}
+                      <span style={{ color: "#10b981" }}>{h.new_value || "(빈)"}</span>
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+            )}
             {selected.remarks && (
               <div style={{ marginTop: 6, padding: "6px 8px", background: "#f8fafc", borderRadius: 6, fontSize: 11, color: "#475569" }}>
                 📝 {selected.remarks}
@@ -3617,10 +3798,10 @@ function AuditPage() {
             )}
           </section>
 
-          {/* 연결 파일 */}
+          {/* 계약서 보기 */}
           <section>
             <div style={{ fontWeight: 700, fontSize: 13, color: "#1e293b", marginBottom: 6, borderBottom: "1px solid #e2e8f0", paddingBottom: 3 }}>
-              연결 파일 ({docs.length}건)
+              계약서 보기 ({docs.length}건)
             </div>
             {docs.length === 0 && <div style={{ fontSize: 12, color: "#f59e0b" }}>⚠ 연결된 파일 없음</div>}
             {docs.map((d, i) => (
@@ -3698,12 +3879,6 @@ function AuditPage() {
               메타 정보
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
-                <input type="checkbox" checked={meta.verified} onChange={e => setMeta(m => ({ ...m, verified: e.target.checked }))} />
-                <span style={{ color: meta.verified ? "#10b981" : "#64748b", fontWeight: meta.verified ? 600 : 400 }}>
-                  {meta.verified ? "✓ 확인 완료" : "확인 전"}
-                </span>
-              </label>
               <div>
                 <div style={{ fontSize: 11, color: "#64748b", marginBottom: 3 }}>합본 페이지 (파일 선택 후 입력)</div>
                 <input value={meta.page_range} onChange={e => setMeta(m => ({ ...m, page_range: e.target.value }))}
@@ -3723,9 +3898,9 @@ function AuditPage() {
                   rows={3}
                   style={{ width: "100%", padding: "4px 6px", border: "1px solid #cbd5e1", borderRadius: 5, fontSize: 12, boxSizing: "border-box", resize: "vertical" }} />
               </div>
-              <button onClick={handleSaveMeta} disabled={saving}
-                style={{ padding: "7px 0", background: saving ? "#94a3b8" : "#3b82f6", color: "#fff", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: saving ? "default" : "pointer" }}>
-                {saving ? "저장 중..." : "저장"}
+              <button onClick={handleSave} disabled={saving}
+                style={{ padding: "8px 0", background: saving ? "#94a3b8" : (selected.verified_at ? "#10b981" : "#16a34a"), color: "#fff", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 700, cursor: saving ? "default" : "pointer" }}>
+                {saving ? "저장 중..." : (selected.verified_at ? `✓ 재저장${Object.keys(edits).length > 0 ? ` (변경 ${Object.keys(edits).length}건)` : ""}` : `✓ 확정 저장${Object.keys(edits).length > 0 ? ` (변경 ${Object.keys(edits).length}건)` : ""}`)}
               </button>
             </div>
           </section>
@@ -3758,7 +3933,7 @@ function AuditPage() {
             </div>
           </div>
         ) : (
-          <iframe src={pdfUrl} style={{ flex: 1, width: "100%", height: "100%", border: "none" }} title="PDF 뷰어" />
+          <iframe src={`${pdfUrl}#view=Fit`} style={{ flex: 1, width: "100%", height: "100%", border: "none" }} title="PDF 뷰어" />
         )}
       </div>
     </div>

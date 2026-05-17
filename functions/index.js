@@ -198,6 +198,20 @@ async function ensureAppSchema() {
   await safeAlter("alter table contracts add column if not exists tags text[]");
   await safeAlter("alter table contracts add column if not exists meta_memo text");
   await safeAlter("alter table contracts add column if not exists transferred_from_id bigint");
+  await safeAlter("alter table contracts add column if not exists last_correction_at timestamptz");
+  await safeAlter("alter table contracts add column if not exists correction_count int not null default 0");
+  await pool.query(`
+    create table if not exists contract_corrections (
+      id bigserial primary key,
+      contract_id bigint not null,
+      field_name text not null,
+      old_value text,
+      new_value text,
+      corrected_at timestamptz not null default now(),
+      corrected_by text
+    )
+  `);
+  await safeAlter("create index if not exists idx_corrections_contract on contract_corrections (contract_id, corrected_at desc)");
   await safeAlter("alter table contract_changes add column if not exists apply_month text");
   await safeAlter("alter table contract_changes add column if not exists applied boolean not null default false");
   await pool.query(`
@@ -1402,9 +1416,12 @@ app.get("/admin/audit-list", async (_req, res) => {
       select c.id, c.contractor_name, c.status, c.contract_name,
         to_char(c.contract_date,'YYYY-MM-DD') contract_date,
         to_char(c.first_allowance_date,'YYYY-MM-DD') first_allowance_date,
+        to_char(c.contract_end_date,'YYYY-MM-DD') contract_end_date,
         c.deposit_amount, c.work_allowance, c.referrer_name, c.affiliation,
         c.bank_name, c.account_no, c.account_holder, c.phone, c.remarks,
+        c.resident_registration_number,
         c.verified_at, c.tags, c.meta_memo, c.transferred_from_id,
+        c.correction_count, to_char(c.last_correction_at,'YYYY-MM-DD HH24:MI:SS') as last_correction_at,
         count(d.id) filter (where d.deleted_at is null) as doc_count,
         (select contractor_name from contracts where id = c.transferred_from_id) as transferred_from_name
       from contracts c
@@ -1438,6 +1455,96 @@ app.put("/contracts/:id/meta", async (req, res) => {
       await pool.query("update contract_documents set page_range = $1 where id = $2", [page_range || null, doc_id]);
     }
     res.json({ ok: true });
+  } catch (error) { res.status(500).json({ message: String(error) }); }
+});
+
+// 계약 정보 정정 (대사 페이지 전용)
+const ALLOWED_CORRECTION_FIELDS = {
+  status: "text",
+  contract_date: "date",
+  first_allowance_date: "date",
+  contract_end_date: "date",
+  deposit_amount: "numeric",
+  work_allowance: "numeric",
+  bank_name: "text",
+  account_no: "text",
+  account_holder: "text",
+  phone: "text",
+  resident_registration_number: "text",
+};
+app.put("/contracts/:id/correction", async (req, res) => {
+  const { id } = req.params;
+  const { changes, corrected_by } = req.body ?? {};
+  if (!changes || typeof changes !== "object" || Array.isArray(changes)) {
+    return res.status(400).json({ ok: false, message: "changes 객체 필수" });
+  }
+  const client = await pool.connect();
+  try {
+    await ensureAppSchema();
+    await client.query("BEGIN");
+
+    const cur = await client.query(`SELECT * FROM contracts WHERE id = $1`, [id]);
+    if (cur.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ ok: false, message: "계약 없음" });
+    }
+    const before = cur.rows[0];
+
+    const setExprs = [];
+    const params = [];
+    const corrections = [];
+    let pi = 1;
+    for (const [field, newValue] of Object.entries(changes)) {
+      if (!Object.prototype.hasOwnProperty.call(ALLOWED_CORRECTION_FIELDS, field)) continue;
+      const type = ALLOWED_CORRECTION_FIELDS[field];
+      const oldVal = before[field];
+      const oldStr = oldVal == null ? "" : String(oldVal);
+      const newStr = newValue == null ? "" : String(newValue);
+      if (oldStr === newStr) continue;
+      let castVal = newValue;
+      if (type === "numeric") castVal = newValue === "" || newValue == null ? null : Number(newValue);
+      if (type === "date") castVal = newValue === "" || newValue == null ? null : newValue;
+      params.push(castVal);
+      setExprs.push(`${field} = $${pi++}`);
+      corrections.push({ field, old: oldStr, new: newStr });
+    }
+    if (setExprs.length === 0) {
+      await client.query("ROLLBACK");
+      return res.json({ ok: true, applied: 0, message: "변경 사항 없음" });
+    }
+    params.push(id);
+    await client.query(
+      `UPDATE contracts SET ${setExprs.join(", ")}, last_correction_at = now(), correction_count = correction_count + 1, verified_at = coalesce(verified_at, now()) WHERE id = $${pi}`,
+      params
+    );
+    for (const c of corrections) {
+      await client.query(
+        `INSERT INTO contract_corrections (contract_id, field_name, old_value, new_value, corrected_by) VALUES ($1,$2,$3,$4,$5)`,
+        [id, c.field, c.old, c.new, corrected_by || null]
+      );
+    }
+    await client.query("COMMIT");
+    res.json({ ok: true, applied: corrections.length, corrections });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ ok: false, message: String(error) });
+  } finally {
+    client.release();
+  }
+});
+
+// 계약 정정 이력 조회
+app.get("/contracts/:id/corrections", async (req, res) => {
+  try {
+    await ensureAppSchema();
+    const { id } = req.params;
+    const r = await pool.query(
+      `SELECT id, field_name, old_value, new_value,
+              to_char(corrected_at,'YYYY-MM-DD HH24:MI:SS') as corrected_at, corrected_by
+       FROM contract_corrections WHERE contract_id = $1 ORDER BY corrected_at DESC, id DESC`,
+      [id]
+    );
+    res.json({ rows: r.rows });
   } catch (error) { res.status(500).json({ message: String(error) }); }
 });
 
